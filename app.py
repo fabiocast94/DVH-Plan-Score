@@ -3,12 +3,10 @@ import pydicom
 import numpy as np
 import plotly.express as px
 
-st.title("Plan Quality Dashboard - Multi-Piano DVH")
+st.title("Plan Quality Dashboard - Multi-Piano DVH (Stable)")
 
+# Funzione per creare maschera 3D semplice usando bounding box dei contorni
 def get_mask_from_contours_simple(struct, roi_name, dose_shape, dose_spacing, dose_origin):
-    """
-    Maschera 3D semplificata dell'organo usando bounding box dei contorni.
-    """
     roi_number = next(item.ROINumber for item in struct.StructureSetROISequence if item.ROIName==roi_name)
     contours = [c for c in struct.ROIContourSequence if c.ReferencedROINumber==roi_number]
     mask = np.zeros(dose_shape, dtype=bool)
@@ -24,7 +22,7 @@ def get_mask_from_contours_simple(struct, roi_name, dose_shape, dose_spacing, do
                 mask[z, y_min:y_max+1, x_min:x_max+1] = True
     return mask
 
-st.write("### Carica i piani RTDOSE e il RTSTRUCT")
+st.write("### Carica RTSTRUCT e RTDOSE")
 uploaded_struct = st.file_uploader("RTSTRUCT", type=["dcm"])
 uploaded_doses = st.file_uploader("RTDOSE (più file)", type=["dcm"], accept_multiple_files=True)
 
