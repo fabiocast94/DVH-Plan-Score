@@ -1,5 +1,5 @@
 streamlit
 pydicom
-dicompyler-core
+rt-utils
 numpy
 plotly
