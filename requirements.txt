@@ -1,6 +1,6 @@
-streamlit
-pydicom
-rt-utils
-numpy
-plotly
-opencv-python
+streamlit==1.26.0
+pydicom==2.5.0
+rt-utils==1.4.0
+numpy==1.26.0
+plotly==5.18.0
+opencv-python==4.8.1.78
