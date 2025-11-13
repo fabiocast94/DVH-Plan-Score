@@ -2,4 +2,3 @@ streamlit==1.26.0
 pydicom==2.5.0
 numpy==1.26.0
 plotly==5.18.0
-scipy==1.11.1
