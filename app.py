@@ -38,7 +38,7 @@ def better_value(old, new, metric):
 # 2) STREAMLIT UI
 # ============================================================
 st.title("🔬 Analisi Dose Hunter – Multi-Struttura e Multi-Metrica")
-st.write("Identificazione automatica della struttura dalla colonna '(vol)'.")
+st.write("Identificazione automatica delle strutture e delle metriche dal file Dose Hunter.")
 
 uploaded_file = st.file_uploader("Carica file Excel Dose Hunter", type=["xlsx"])
 
@@ -68,29 +68,30 @@ if uploaded_file:
         st.stop()
     st.info(f"Colonna Piano identificata: **{col_plan}**")
 
-    # Volume / Struttura
-    possible_vol_cols = [c for c in df.columns if "vol" in c.lower()]
-    if possible_vol_cols:
-        col_volume = possible_vol_cols[0]
-        st.info(f"Colonna Volume identificata: **{col_volume}**")
-
-        # Estrazione nome struttura dal nome colonna
-        struttura_nome = col_volume.replace("(vol)", "").strip()
-        df["Struttura"] = struttura_nome
-
-        # Metrica = colonna successiva
-        idx_volume = df.columns.get_loc(col_volume)
-        if idx_volume + 1 < len(df.columns):
-            col_metric = df.columns[idx_volume + 1]
-        else:
-            st.error("❌ Nessuna colonna metrica trovata dopo Volume.")
-            st.stop()
-    else:
-        st.error("❌ Nessuna colonna con 'vol' trovata.")
+    # Trova tutte le colonne volume (strutture)
+    vol_cols = [c for c in df.columns if "(vol)" in c.lower()]
+    if not vol_cols:
+        st.error("❌ Nessuna colonna volume trovata.")
         st.stop()
 
-    col_value = col_metric
-    st.success(f"Metrica identificata automaticamente: **{col_metric}**")
+    # Creiamo colonna Struttura
+    df["Struttura"] = ""
+    metric_map = {}  # struttura -> lista metriche
+
+    for i, vol_col in enumerate(vol_cols):
+        struttura_nome = vol_col.replace("(vol)", "").strip()
+        df.loc[:, "Struttura"] = struttura_nome if df["Struttura"].eq("").all() else df["Struttura"]
+
+        idx_start = df.columns.get_loc(vol_col) + 1
+        idx_end = df.shape[1]
+        if i + 1 < len(vol_cols):
+            idx_end = df.columns.get_loc(vol_cols[i + 1])
+        metric_cols = list(df.columns[idx_start:idx_end])
+        metric_map[struttura_nome] = metric_cols
+
+    st.info(f"Strutture trovate: {list(metric_map.keys())}")
+    for s, m in metric_map.items():
+        st.write(f"**{s}** -> metriche: {m}")
 
     # ============================================================
     # 4) IDENTIFICAZIONE VECCHIO VS NUOVO
@@ -98,30 +99,32 @@ if uploaded_file:
     df["TipoPiano"] = df[col_plan].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
 
     # ============================================================
-    # 5) COSTRUZIONE RISULTATI MULTI-STRUTTURA (robusta)
+    # 5) COSTRUZIONE RISULTATI MULTI-STRUTTURA E MULTI-METRICA
     # ============================================================
     results = []
 
     for id_val in df[col_id].unique():
-        for struct in df["Struttura"].unique():
-            subset = df[(df[col_id] == id_val) & (df["Struttura"] == struct)]
-            if len(subset) < 2:
+        for struct, metrics in metric_map.items():
+            subset = df[df["Struttura"] == struct]
+            subset = subset[subset[col_id] == id_val]
+            if subset.empty:
                 continue
-            old_row = subset[subset["TipoPiano"] == "Vecchio"]
-            new_row = subset[subset["TipoPiano"] == "Nuovo"]
-            if old_row.empty or new_row.empty:
-                continue
-            old_value = old_row.iloc[0][col_value]
-            new_value = new_row.iloc[0][col_value]
-            winner = better_value(old_value, new_value, col_metric)
-            results.append({
-                "ID": id_val,
-                "Struttura": struct,
-                "Metrica": col_metric,
-                "Valore Vecchio": old_value,
-                "Valore Nuovo": new_value,
-                "Migliore": winner
-            })
+            for metric in metrics:
+                old_row = subset[subset["TipoPiano"] == "Vecchio"]
+                new_row = subset[subset["TipoPiano"] == "Nuovo"]
+                if old_row.empty or new_row.empty:
+                    continue
+                old_value = old_row.iloc[0][metric]
+                new_value = new_row.iloc[0][metric]
+                winner = better_value(old_value, new_value, metric)
+                results.append({
+                    "ID": id_val,
+                    "Struttura": struct,
+                    "Metrica": metric,
+                    "Valore Vecchio": old_value,
+                    "Valore Nuovo": new_value,
+                    "Migliore": winner
+                })
 
     results_df = pd.DataFrame(results)
 
@@ -197,26 +200,4 @@ if uploaded_file:
     # ============================================================
     # 9) EXPORT EXCEL
     # ============================================================
-    st.subheader("📥 Esporta risultati")
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        results_df.to_excel(writer, sheet_name="Risultati", index=False)
-        pivot.to_excel(writer, sheet_name="Heatmap")
-        wilcox_df.to_excel(writer, sheet_name="Wilcoxon", index=False)
-
-    st.download_button(
-        "Scarica Excel completo",
-        data=output.getvalue(),
-        file_name="Analisi_RapidPlan_multiStruttura.xlsx"
-    )
-
-    # ============================================================
-    # 10) RISULTATO FINALE
-    # ============================================================
-    st.subheader("🏆 RISULTATO FINALE")
-    summary = results_df["Migliore"].value_counts()
-    st.write(summary)
-    if summary.get("Nuovo", 0) > summary.get("Vecchio", 0):
-        st.success("🎉 Il nuovo modello RapidPlan risulta migliore!")
-    else:
-        st.error("⚠️ Il vecchio modello sembra migliore… per questi dati.")
+    st
