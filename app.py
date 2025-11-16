@@ -74,7 +74,9 @@ if uploaded_file:
         st.error("❌ Nessuna colonna volume trovata.")
         st.stop()
 
-    # Creiamo colonna Struttura
+    # ============================================================
+    # 4) COSTRUZIONE STRUTTURE E METRICHE
+    # ============================================================
     df["Struttura"] = ""
     metric_map = {}  # struttura -> lista metriche
 
@@ -86,7 +88,9 @@ if uploaded_file:
         idx_end = df.shape[1]
         if i + 1 < len(vol_cols):
             idx_end = df.columns.get_loc(vol_cols[i + 1])
-        metric_cols = list(df.columns[idx_start:idx_end])
+
+        # 🔹 Solo colonne numeriche come metriche (esclude 'Struttura')
+        metric_cols = [c for c in df.columns[idx_start:idx_end] if pd.api.types.is_numeric_dtype(df[c])]
         metric_map[struttura_nome] = metric_cols
 
     st.info(f"Strutture trovate: {list(metric_map.keys())}")
@@ -94,12 +98,12 @@ if uploaded_file:
         st.write(f"**{s}** -> metriche: {m}")
 
     # ============================================================
-    # 4) IDENTIFICAZIONE VECCHIO VS NUOVO
+    # 5) IDENTIFICAZIONE VECCHIO VS NUOVO
     # ============================================================
     df["TipoPiano"] = df[col_plan].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
 
     # ============================================================
-    # 5) COSTRUZIONE RISULTATI MULTI-STRUTTURA E MULTI-METRICA
+    # 6) COSTRUZIONE RISULTATI MULTI-STRUTTURA E MULTI-METRICA
     # ============================================================
     results = []
 
@@ -136,7 +140,7 @@ if uploaded_file:
     st.dataframe(results_df)
 
     # ============================================================
-    # 6) RADAR PLOT
+    # 7) RADAR PLOT
     # ============================================================
     st.subheader("📈 Radar Plot per ID e Struttura")
     selected_id = st.selectbox("Seleziona ID", results_df["ID"].unique())
@@ -164,7 +168,7 @@ if uploaded_file:
     st.plotly_chart(fig)
 
     # ============================================================
-    # 7) HEATMAP
+    # 8) HEATMAP
     # ============================================================
     st.subheader("🔥 Heatmap globale")
     pivot = results_df.pivot_table(
@@ -179,7 +183,7 @@ if uploaded_file:
     st.pyplot(fig2)
 
     # ============================================================
-    # 8) WILCOXON
+    # 9) WILCOXON
     # ============================================================
     st.subheader("📊 Test Wilcoxon")
     wilcox_out = []
@@ -198,6 +202,28 @@ if uploaded_file:
     st.dataframe(wilcox_df)
 
     # ============================================================
-    # 9) EXPORT EXCEL
+    # 10) EXPORT EXCEL
     # ============================================================
-    st
+    st.subheader("📥 Esporta risultati")
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        results_df.to_excel(writer, sheet_name="Risultati", index=False)
+        pivot.to_excel(writer, sheet_name="Heatmap")
+        wilcox_df.to_excel(writer, sheet_name="Wilcoxon", index=False)
+
+    st.download_button(
+        "Scarica Excel completo",
+        data=output.getvalue(),
+        file_name="Analisi_RapidPlan_multiStruttura.xlsx"
+    )
+
+    # ============================================================
+    # 11) RISULTATO FINALE
+    # ============================================================
+    st.subheader("🏆 RISULTATO FINALE")
+    summary = results_df["Migliore"].value_counts()
+    st.write(summary)
+    if summary.get("Nuovo", 0) > summary.get("Vecchio", 0):
+        st.success("🎉 Il nuovo modello RapidPlan risulta migliore!")
+    else:
+        st.error("⚠️ Il vecchio modello sembra migliore… per questi dati.")
