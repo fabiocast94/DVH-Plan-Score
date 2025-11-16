@@ -1,4 +1,8 @@
 streamlit
-pydicom
+pandas
 numpy
+scipy
 plotly
+openpyxl
+seaborn
+matplotlib
