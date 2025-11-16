@@ -1,66 +1,190 @@
 import streamlit as st
-import pydicom
+import pandas as pd
 import numpy as np
-import plotly.express as px
+from scipy.stats import wilcoxon
+import plotly.graph_objects as go
+import seaborn as sns
+import matplotlib.pyplot as plt
+from io import BytesIO
 
-st.title("Plan Quality Dashboard - Multi-Piano DVH (Stable)")
 
-# Funzione per creare maschera 3D semplice usando bounding box dei contorni
-def get_mask_from_contours_simple(struct, roi_name, dose_shape, dose_spacing, dose_origin):
-    roi_number = next(item.ROINumber for item in struct.StructureSetROISequence if item.ROIName==roi_name)
-    contours = [c for c in struct.ROIContourSequence if c.ReferencedROINumber==roi_number]
-    mask = np.zeros(dose_shape, dtype=bool)
+# ============================================================
+# FUNZIONE CONFRONTO VALORI
+# ============================================================
+def better_value(old, new, criterion):
+    if pd.isna(old) or pd.isna(new):
+        return "N/A"
+    return "Nuovo" if ((criterion == "lower" and new < old) or 
+                       (criterion == "higher" and new > old)) else "Vecchio"
 
-    for contour_seq in contours:
-        for cdata in contour_seq.ContourSequence:
-            pts = np.array(cdata.ContourData).reshape(-1,3)
-            z = int(round((pts[0,2]-dose_origin[2])/dose_spacing[2]))
-            if 0 <= z < dose_shape[0]:
-                xy_voxels = np.round((pts[:,:2]-dose_origin[:2])/dose_spacing[:2]).astype(int)
-                x_min, x_max = xy_voxels[:,0].min(), xy_voxels[:,0].max()
-                y_min, y_max = xy_voxels[:,1].min(), xy_voxels[:,1].max()
-                mask[z, y_min:y_max+1, x_min:x_max+1] = True
-    return mask
 
-st.write("### Carica RTSTRUCT e RTDOSE")
-uploaded_struct = st.file_uploader("RTSTRUCT", type=["dcm"])
-uploaded_doses = st.file_uploader("RTDOSE (più file)", type=["dcm"], accept_multiple_files=True)
+# ============================================================
+# INTERFACCIA STREAMLIT
+# ============================================================
+st.title("🔬 Analisi RapidPlan Avanzata – Multi-ID, Multi-Struttura")
 
-if uploaded_struct and uploaded_doses:
-    try:
-        struct = pydicom.dcmread(uploaded_struct)
-        roi_names = [item.ROIName for item in struct.StructureSetROISequence]
-        selected_organ = st.selectbox("Seleziona organo", roi_names)
+uploaded_file = st.file_uploader("Carica file Excel Dose Hunter", type=["xlsx"])
 
-        plan_dvhs = {}
+if uploaded_file:
+    df = pd.read_excel(uploaded_file)
 
-        for dose_file in uploaded_doses:
-            dose = pydicom.dcmread(dose_file)
-            dose_array = dose.pixel_array * dose.DoseGridScaling
-            dose_shape = dose_array.shape  # (z,y,x)
-            spacing = np.array([float(dose.GridFrameOffsetVector[1]-dose.GridFrameOffsetVector[0])] + list(dose.PixelSpacing))
-            origin = np.array([float(dose.ImagePositionPatient[2]), float(dose.ImagePositionPatient[1]), float(dose.ImagePositionPatient[0])])
+    st.subheader("📁 Anteprima dati")
+    st.dataframe(df.head())
 
-            mask = get_mask_from_contours_simple(struct, selected_organ, dose_shape, spacing, origin)
-            organ_doses = dose_array[mask]
+    # --------------------------------------------------------
+    # SELEZIONE COLONNE
+    # --------------------------------------------------------
+    st.subheader("⚙️ Seleziona colonne")
+    col_id = st.selectbox("Colonna ID paziente", df.columns)
+    col_structure = st.selectbox("Colonna struttura (PTV, OAR, ecc.)", df.columns)
+    col_metric = st.selectbox("Colonna metrica", df.columns)
+    col_old = st.selectbox("Colonna Piano Vecchio", df.columns)
+    col_new = st.selectbox("Colonna Piano Nuovo", df.columns)
 
-            hist, bin_edges = np.histogram(organ_doses, bins=100, range=(0, np.max(dose_array)))
-            dvh_cum = 100 * (1 - np.cumsum(hist)/np.sum(hist))
-            plan_dvhs[dose_file.name] = (bin_edges[:-1], dvh_cum)
+    # --------------------------------------------------------
+    # CRITERI PER METRICHE
+    # --------------------------------------------------------
+    metrics = df[col_metric].unique()
+    structures = df[col_structure].unique()
 
-        # Plot DVH multi-piano
-        fig = px.line(title=f"DVH per {selected_organ}")
-        for plan_name, (x, y) in plan_dvhs.items():
-            fig.add_scatter(x=x, y=y, mode='lines', name=plan_name)
-        fig.update_layout(xaxis_title="Dose [Gy]", yaxis_title="Volume [%]")
+    st.subheader("📌 Criteri valutazione per ogni metrica")
+
+    criteria = {}
+    for m in metrics:
+        criteria[m] = st.selectbox(
+            f"{m} – quale valore è migliore?",
+            ["lower is better", "higher is better"],
+            index=0
+        )
+
+    # --------------------------------------------------------
+    # ANALISI
+    # --------------------------------------------------------
+    results = []
+
+    for _, row in df.iterrows():
+        metric = row[col_metric]
+        crit = "lower" if criteria[metric] == "lower is better" else "higher"
+        winner = better_value(row[col_old], row[col_new], crit)
+
+        results.append({
+            "ID": row[col_id],
+            "Struttura": row[col_structure],
+            "Metrica": metric,
+            "Piano Vecchio": row[col_old],
+            "Piano Nuovo": row[col_new],
+            "Migliore": winner
+        })
+
+    results_df = pd.DataFrame(results)
+
+    st.subheader("📊 Risultati del confronto")
+    st.dataframe(results_df)
+
+    # --------------------------------------------------------
+    # RADAR PLOT PER ID
+    # --------------------------------------------------------
+    st.subheader("📈 Radar plot")
+
+    selected_id = st.selectbox("Seleziona ID", df[col_id].unique())
+    selected_structure = st.selectbox("Seleziona struttura", structures)
+
+    subset = results_df[
+        (results_df["ID"] == selected_id) &
+        (results_df["Struttura"] == selected_structure)
+    ]
+
+    if subset.empty:
+        st.warning("Nessun dato disponibile per questo ID e struttura.")
+    else:
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatterpolar(
+            r=subset["Piano Vecchio"].values,
+            theta=subset["Metrica"].values,
+            fill="toself",
+            name="Vecchio"
+        ))
+        fig.add_trace(go.Scatterpolar(
+            r=subset["Piano Nuovo"].values,
+            theta=subset["Metrica"].values,
+            fill="toself",
+            name="Nuovo"
+        ))
+
+        fig.update_layout(
+            polar=dict(radialaxis=dict(visible=True)),
+            showlegend=True
+        )
+
         st.plotly_chart(fig)
 
-        # Calcolo plan score semplice (dose media)
-        st.write("### Plan Scores (dose media dell'organo)")
-        for plan_name, (x, y) in plan_dvhs.items():
-            mean_dose = np.mean(dose_array[mask])
-            plan_score = max(0, 100 - mean_dose)  # esempio semplice
-            st.write(f"{plan_name}: {plan_score:.2f}")
+    # --------------------------------------------------------
+    # HEATMAP GLOBALE
+    # --------------------------------------------------------
+    st.subheader("🔥 Heatmap globale (vincitore per ID/Metrica)")
 
-    except Exception as e:
-        st.error(f"Errore: {e}")
+    pivot = results_df.pivot_table(
+        index="ID", columns="Metrica", values="Migliore", aggfunc=lambda x: x.iloc[0]
+    )
+
+    mapping = {"Vecchio": 0, "Nuovo": 1, "N/A": np.nan}
+    heatmap_data = pivot.replace(mapping)
+
+    fig2, ax = plt.subplots(figsize=(10, 6))
+    sns.heatmap(heatmap_data, cmap="coolwarm", annot=pivot, fmt="", ax=ax)
+    st.pyplot(fig2)
+
+    # --------------------------------------------------------
+    # ANALISI STATISTICA WILCOXON
+    # --------------------------------------------------------
+    st.subheader("📊 Test Wilcoxon per ogni metrica")
+
+    wilcoxon_results = []
+
+    for m in metrics:
+        old_vals = df[df[col_metric] == m][col_old]
+        new_vals = df[df[col_metric] == m][col_new]
+
+        try:
+            stat, p_value = wilcoxon(old_vals, new_vals)
+            wilcoxon_results.append([m, stat, p_value])
+        except:
+            wilcoxon_results.append([m, np.nan, np.nan])
+
+    wilcoxon_df = pd.DataFrame(wilcoxon_results, columns=["Metric", "Statistic", "p-value"])
+    st.dataframe(wilcoxon_df)
+
+    # --------------------------------------------------------
+    # ESPORTA RISULTATI EXCEL
+    # --------------------------------------------------------
+    st.subheader("📥 Esporta risultati in Excel")
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        results_df.to_excel(writer, sheet_name="Risultati", index=False)
+        pivot.to_excel(writer, sheet_name="Heatmap", index=True)
+        wilcoxon_df.to_excel(writer, sheet_name="Wilcoxon", index=False)
+
+    st.download_button(
+        label="Scarica file risultati",
+        data=output.getvalue(),
+        file_name="Confronto_RapidPlan.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    # --------------------------------------------------------
+    # STATISTICHE FINALI
+    # --------------------------------------------------------
+    st.subheader("🏆 Risultato complessivo")
+
+    summary = results_df["Migliore"].value_counts()
+
+    st.write(summary)
+
+    if summary.get("Nuovo", 0) > summary.get("Vecchio", 0):
+        st.success("🎉 Il NUOVO modello RapidPlan è globalmente migliore!")
+    elif summary.get("Nuovo", 0) < summary.get("Vecchio", 0):
+        st.error("⚠️ Il VECCHIO modello RapidPlan risulta globalmente migliore.")
+    else:
+        st.warning("⚖️ I due modelli risultano equivalenti.")
