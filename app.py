@@ -9,70 +9,91 @@ from io import BytesIO
 
 
 # ============================================================
-# FUNZIONE CONFRONTO VALORI
+# 1) CRITERI FISSI PER OGNI METRICA
+#    (modificali tu quando vuoi → restano permanenti)
 # ============================================================
-def better_value(old, new, criterion):
+METRIC_CRITERIA = {
+    "D95": "higher",
+    "D98": "higher",
+    "D2": "lower",
+    "Dmax": "lower",
+    "Dmean": "lower",
+    "V95": "higher",
+    "V107": "lower",
+    # aggiungerai metriche reali dopo aver visto il file completo
+}
+
+
+# ============================================================
+# FUNZIONE: confronta due valori secondo criterio
+# ============================================================
+def better_value(old, new, metric):
+    crit = METRIC_CRITERIA.get(metric, "lower")   # default: lower is better
     if pd.isna(old) or pd.isna(new):
         return "N/A"
-    return "Nuovo" if ((criterion == "lower" and new < old) or 
-                       (criterion == "higher" and new > old)) else "Vecchio"
+    if crit == "lower":
+        return "Nuovo" if new < old else "Vecchio"
+    else:
+        return "Nuovo" if new > old else "Vecchio"
 
 
 # ============================================================
-# INTERFACCIA STREAMLIT
+# STREAMLIT APP
 # ============================================================
-st.title("🔬 Analisi RapidPlan Avanzata – Multi-ID, Multi-Struttura")
+st.title("🔬 Analisi Dose Hunter – Confronto Pianificazione RapidPlan")
+st.write("Versione con criteri fissi e riconoscimento automatico del piano 'new'.")
 
 uploaded_file = st.file_uploader("Carica file Excel Dose Hunter", type=["xlsx"])
 
 if uploaded_file:
+    # ============================================================
+    # 2) IMPORTAZIONE FILE DOSE HUNTER
+    # ============================================================
     df = pd.read_excel(uploaded_file)
 
     st.subheader("📁 Anteprima dati")
     st.dataframe(df.head())
 
-    # --------------------------------------------------------
-    # SELEZIONE COLONNE
-    # --------------------------------------------------------
-    st.subheader("⚙️ Seleziona colonne")
-    col_id = st.selectbox("Colonna ID paziente", df.columns)
-    col_structure = st.selectbox("Colonna struttura (PTV, OAR, ecc.)", df.columns)
-    col_metric = st.selectbox("Colonna metrica", df.columns)
-    col_old = st.selectbox("Colonna Piano Vecchio", df.columns)
-    col_new = st.selectbox("Colonna Piano Nuovo", df.columns)
+    # ============================================================
+    # 3) IDENTIFICAZIONE AUTOMATICA DELLE COLONNE
+    # ============================================================
+    col_id = "ID"
+    col_plan = "planID"
+    col_volume = "Volume"
 
-    # --------------------------------------------------------
-    # CRITERI PER METRICHE
-    # --------------------------------------------------------
-    metrics = df[col_metric].unique()
-    structures = df[col_structure].unique()
+    # La metrica è la colonna successiva al Volume
+    idx_volume = df.columns.get_loc(col_volume)
+    col_metric = df.columns[idx_volume + 1]
 
-    st.subheader("📌 Criteri valutazione per ogni metrica")
+    st.info(f"Metrica identificata automaticamente: **{col_metric}**")
 
-    criteria = {}
-    for m in metrics:
-        criteria[m] = st.selectbox(
-            f"{m} – quale valore è migliore?",
-            ["lower is better", "higher is better"],
-            index=0
-        )
+    # ============================================================
+    # 4) IDENTIFICAZIONE AUTOMATICA DEI PIANI
+    # ============================================================
+    df["Type"] = df[col_plan].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
 
-    # --------------------------------------------------------
-    # ANALISI
-    # --------------------------------------------------------
+    # Raggruppiamo per ID + metrica
+    grouped = df.groupby([col_id, col_metric])
+
     results = []
 
-    for _, row in df.iterrows():
-        metric = row[col_metric]
-        crit = "lower" if criteria[metric] == "lower is better" else "higher"
-        winner = better_value(row[col_old], row[col_new], crit)
+    # ============================================================
+    # 5) GESTIONE MULTIPARAMETRICA AUTOMATICA
+    # ============================================================
+    for (id_val, metric), group in grouped:
+        if len(group) != 2:
+            continue   # serve 1 vecchio + 1 nuovo
+
+        val_old = group[group["Type"] == "Vecchio"].iloc[0][col_volume]
+        val_new = group[group["Type"] == "Nuovo"].iloc[0][col_volume]
+
+        winner = better_value(val_old, val_new, metric)
 
         results.append({
-            "ID": row[col_id],
-            "Struttura": row[col_structure],
+            "ID": id_val,
             "Metrica": metric,
-            "Piano Vecchio": row[col_old],
-            "Piano Nuovo": row[col_new],
+            "Piano Vecchio": val_old,
+            "Piano Nuovo": val_new,
             "Migliore": winner
         })
 
@@ -81,110 +102,89 @@ if uploaded_file:
     st.subheader("📊 Risultati del confronto")
     st.dataframe(results_df)
 
-    # --------------------------------------------------------
-    # RADAR PLOT PER ID
-    # --------------------------------------------------------
-    st.subheader("📈 Radar plot")
+    # ============================================================
+    # 6) RADAR PLOT AUTOMATICO
+    # ============================================================
+    st.subheader("📈 Radar plot (per ID)")
 
-    selected_id = st.selectbox("Seleziona ID", df[col_id].unique())
-    selected_structure = st.selectbox("Seleziona struttura", structures)
+    selected_id = st.selectbox("Seleziona ID", results_df["ID"].unique())
 
-    subset = results_df[
-        (results_df["ID"] == selected_id) &
-        (results_df["Struttura"] == selected_structure)
-    ]
+    sub = results_df[results_df["ID"] == selected_id]
 
-    if subset.empty:
-        st.warning("Nessun dato disponibile per questo ID e struttura.")
-    else:
-        fig = go.Figure()
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=sub["Piano Vecchio"].values,
+        theta=sub["Metrica"].values,
+        fill='toself',
+        name="Vecchio"
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=sub["Piano Nuovo"].values,
+        theta=sub["Metrica"].values,
+        fill='toself',
+        name="Nuovo"
+    ))
 
-        fig.add_trace(go.Scatterpolar(
-            r=subset["Piano Vecchio"].values,
-            theta=subset["Metrica"].values,
-            fill="toself",
-            name="Vecchio"
-        ))
-        fig.add_trace(go.Scatterpolar(
-            r=subset["Piano Nuovo"].values,
-            theta=subset["Metrica"].values,
-            fill="toself",
-            name="Nuovo"
-        ))
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True)), showlegend=True)
+    st.plotly_chart(fig)
 
-        fig.update_layout(
-            polar=dict(radialaxis=dict(visible=True)),
-            showlegend=True
-        )
+    # ============================================================
+    # 7) HEATMAP GLOBALE
+    # ============================================================
+    st.subheader("🔥 Heatmap globale – piano migliore per ID/Parametro")
 
-        st.plotly_chart(fig)
+    pivot = results_df.pivot(index="ID", columns="Metrica", values="Migliore")
 
-    # --------------------------------------------------------
-    # HEATMAP GLOBALE
-    # --------------------------------------------------------
-    st.subheader("🔥 Heatmap globale (vincitore per ID/Metrica)")
-
-    pivot = results_df.pivot_table(
-        index="ID", columns="Metrica", values="Migliore", aggfunc=lambda x: x.iloc[0]
-    )
-
-    mapping = {"Vecchio": 0, "Nuovo": 1, "N/A": np.nan}
+    mapping = {"Vecchio": 0, "Nuovo": 1}
     heatmap_data = pivot.replace(mapping)
 
     fig2, ax = plt.subplots(figsize=(10, 6))
     sns.heatmap(heatmap_data, cmap="coolwarm", annot=pivot, fmt="", ax=ax)
     st.pyplot(fig2)
 
-    # --------------------------------------------------------
-    # ANALISI STATISTICA WILCOXON
-    # --------------------------------------------------------
-    st.subheader("📊 Test Wilcoxon per ogni metrica")
+    # ============================================================
+    # 8) TEST STATISTICO WILCOXON (per metrica)
+    # ============================================================
+    st.subheader("📊 Test Wilcoxon")
 
-    wilcoxon_results = []
+    wilcox = []
 
-    for m in metrics:
-        old_vals = df[df[col_metric] == m][col_old]
-        new_vals = df[df[col_metric] == m][col_new]
-
+    for metric in results_df["Metrica"].unique():
+        d = results_df[results_df["Metrica"] == metric]
         try:
-            stat, p_value = wilcoxon(old_vals, new_vals)
-            wilcoxon_results.append([m, stat, p_value])
+            stat, pval = wilcoxon(d["Piano Vecchio"], d["Piano Nuovo"])
+            wilcox.append([metric, stat, pval])
         except:
-            wilcoxon_results.append([m, np.nan, np.nan])
+            wilcox.append([metric, None, None])
 
-    wilcoxon_df = pd.DataFrame(wilcoxon_results, columns=["Metric", "Statistic", "p-value"])
-    st.dataframe(wilcoxon_df)
+    wilcox_df = pd.DataFrame(wilcox, columns=["Metrica", "Statistic", "p-value"])
+    st.dataframe(wilcox_df)
 
-    # --------------------------------------------------------
-    # ESPORTA RISULTATI EXCEL
-    # --------------------------------------------------------
-    st.subheader("📥 Esporta risultati in Excel")
+    # ============================================================
+    # 9) ESPORTAZIONE RISULTATI
+    # ============================================================
+    st.subheader("📥 Esporta risultati")
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         results_df.to_excel(writer, sheet_name="Risultati", index=False)
-        pivot.to_excel(writer, sheet_name="Heatmap", index=True)
-        wilcoxon_df.to_excel(writer, sheet_name="Wilcoxon", index=False)
+        pivot.to_excel(writer, sheet_name="Heatmap")
+        wilcox_df.to_excel(writer, sheet_name="Wilcoxon", index=False)
 
     st.download_button(
-        label="Scarica file risultati",
+        label="Scarica Excel",
         data=output.getvalue(),
-        file_name="Confronto_RapidPlan.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        file_name="Analisi_RapidPlan.xlsx"
     )
 
-    # --------------------------------------------------------
-    # STATISTICHE FINALI
-    # --------------------------------------------------------
-    st.subheader("🏆 Risultato complessivo")
+    # ============================================================
+    # 10) RISULTATO FINALE
+    # ============================================================
+    st.subheader("🏆 Risultato finale")
 
-    summary = results_df["Migliore"].value_counts()
+    count = results_df["Migliore"].value_counts()
 
-    st.write(summary)
-
-    if summary.get("Nuovo", 0) > summary.get("Vecchio", 0):
-        st.success("🎉 Il NUOVO modello RapidPlan è globalmente migliore!")
-    elif summary.get("Nuovo", 0) < summary.get("Vecchio", 0):
-        st.error("⚠️ Il VECCHIO modello RapidPlan risulta globalmente migliore.")
+    if count.get("Nuovo", 0) > count.get("Vecchio", 0):
+        st.success("🎉 Il NUOVO modello è globalmente migliore!")
     else:
-        st.warning("⚖️ I due modelli risultano equivalenti.")
+        st.error("⚠️ Il modello vecchio sembra migliore… per ora.")
