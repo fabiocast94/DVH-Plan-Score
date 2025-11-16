@@ -23,7 +23,6 @@ METRIC_CRITERIA = {
     "V20": "lower",
     "V5": "lower",
     "V10": "lower",
-    # aggiungere altre metriche quando avremo il file completo
 }
 
 def better_value(old, new, metric):
@@ -39,7 +38,7 @@ def better_value(old, new, metric):
 # 2) STREAMLIT UI
 # ============================================================
 st.title("🔬 Analisi Dose Hunter – Multi-Struttura e Multi-Metrica")
-st.write("Versione robusta con identificazione automatica della struttura dalla colonna '(vol)'.")
+st.write("Identificazione automatica della struttura dalla colonna '(vol)'.")
 
 uploaded_file = st.file_uploader("Carica file Excel Dose Hunter", type=["xlsx"])
 
@@ -87,7 +86,7 @@ if uploaded_file:
             st.error("❌ Nessuna colonna metrica trovata dopo Volume.")
             st.stop()
     else:
-        st.error("❌ Nessuna colonna con 'vol' trovata. Serve per identificare la struttura.")
+        st.error("❌ Nessuna colonna con 'vol' trovata.")
         st.stop()
 
     col_value = col_metric
@@ -99,27 +98,37 @@ if uploaded_file:
     df["TipoPiano"] = df[col_plan].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
 
     # ============================================================
-    # 5) COSTRUZIONE RISULTATI MULTI-STRUTTURA
+    # 5) COSTRUZIONE RISULTATI MULTI-STRUTTURA (robusta)
     # ============================================================
-    grouped = df.groupby([col_id, "Struttura", col_metric])
     results = []
 
-    for (id_val, struct, metric), group in grouped:
-        if len(group) != 2:
-            continue
-        old_value = group[group["TipoPiano"] == "Vecchio"].iloc[0][col_value]
-        new_value = group[group["TipoPiano"] == "Nuovo"].iloc[0][col_value]
-        winner = better_value(old_value, new_value, metric)
-        results.append({
-            "ID": id_val,
-            "Struttura": struct,
-            "Metrica": metric,
-            "Valore Vecchio": old_value,
-            "Valore Nuovo": new_value,
-            "Migliore": winner
-        })
+    for id_val in df[col_id].unique():
+        for struct in df["Struttura"].unique():
+            subset = df[(df[col_id] == id_val) & (df["Struttura"] == struct)]
+            if len(subset) < 2:
+                continue
+            old_row = subset[subset["TipoPiano"] == "Vecchio"]
+            new_row = subset[subset["TipoPiano"] == "Nuovo"]
+            if old_row.empty or new_row.empty:
+                continue
+            old_value = old_row.iloc[0][col_value]
+            new_value = new_row.iloc[0][col_value]
+            winner = better_value(old_value, new_value, col_metric)
+            results.append({
+                "ID": id_val,
+                "Struttura": struct,
+                "Metrica": col_metric,
+                "Valore Vecchio": old_value,
+                "Valore Nuovo": new_value,
+                "Migliore": winner
+            })
 
     results_df = pd.DataFrame(results)
+
+    if results_df.empty:
+        st.warning("⚠️ Nessun dato valido trovato per il confronto Vecchio/Nuovo.")
+        st.stop()
+
     st.subheader("📊 Risultati del confronto")
     st.dataframe(results_df)
 
@@ -127,46 +136,44 @@ if uploaded_file:
     # 6) RADAR PLOT
     # ============================================================
     st.subheader("📈 Radar Plot per ID e Struttura")
-    if len(results_df) > 0:
-        selected_id = st.selectbox("Seleziona ID", results_df["ID"].unique())
-        subset_structures = results_df[results_df["ID"] == selected_id]["Struttura"].unique()
-        selected_structure = st.selectbox("Seleziona Struttura", subset_structures)
+    selected_id = st.selectbox("Seleziona ID", results_df["ID"].unique())
+    subset_structures = results_df[results_df["ID"] == selected_id]["Struttura"].unique()
+    selected_structure = st.selectbox("Seleziona Struttura", subset_structures)
 
-        radar_data = results_df[
-            (results_df["ID"] == selected_id) &
-            (results_df["Struttura"] == selected_structure)
-        ]
+    radar_data = results_df[
+        (results_df["ID"] == selected_id) &
+        (results_df["Struttura"] == selected_structure)
+    ]
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatterpolar(
-            r=radar_data["Valore Vecchio"],
-            theta=radar_data["Metrica"],
-            fill='toself',
-            name="Vecchio"
-        ))
-        fig.add_trace(go.Scatterpolar(
-            r=radar_data["Valore Nuovo"],
-            theta=radar_data["Metrica"],
-            fill='toself',
-            name="Nuovo"
-        ))
-        st.plotly_chart(fig)
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=radar_data["Valore Vecchio"],
+        theta=radar_data["Metrica"],
+        fill='toself',
+        name="Vecchio"
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=radar_data["Valore Nuovo"],
+        theta=radar_data["Metrica"],
+        fill='toself',
+        name="Nuovo"
+    ))
+    st.plotly_chart(fig)
 
     # ============================================================
     # 7) HEATMAP
     # ============================================================
     st.subheader("🔥 Heatmap globale")
-    if len(results_df) > 0:
-        pivot = results_df.pivot_table(
-            index="ID",
-            columns=["Struttura", "Metrica"],
-            values="Migliore",
-            aggfunc=lambda x: x.iloc[0]
-        )
-        heatmap_numeric = pivot.replace({"Vecchio": 0, "Nuovo": 1})
-        fig2, ax = plt.subplots(figsize=(16, 6))
-        sns.heatmap(heatmap_numeric, cmap="coolwarm", annot=pivot, fmt="", ax=ax)
-        st.pyplot(fig2)
+    pivot = results_df.pivot_table(
+        index="ID",
+        columns=["Struttura", "Metrica"],
+        values="Migliore",
+        aggfunc=lambda x: x.iloc[0]
+    )
+    heatmap_numeric = pivot.replace({"Vecchio": 0, "Nuovo": 1})
+    fig2, ax = plt.subplots(figsize=(16, 6))
+    sns.heatmap(heatmap_numeric, cmap="coolwarm", annot=pivot, fmt="", ax=ax)
+    st.pyplot(fig2)
 
     # ============================================================
     # 8) WILCOXON
@@ -194,8 +201,7 @@ if uploaded_file:
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         results_df.to_excel(writer, sheet_name="Risultati", index=False)
-        if len(results_df) > 0:
-            pivot.to_excel(writer, sheet_name="Heatmap")
+        pivot.to_excel(writer, sheet_name="Heatmap")
         wilcox_df.to_excel(writer, sheet_name="Wilcoxon", index=False)
 
     st.download_button(
