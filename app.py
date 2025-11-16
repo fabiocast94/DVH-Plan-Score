@@ -11,6 +11,7 @@ from io import BytesIO
 # 1) CRITERI FISSI PER LE METRICHE (MODIFICABILI QUI)
 # ============================================================
 METRIC_CRITERIA = {
+    "HI": "lower",        # Homogeneity Index
     "D95": "higher",
     "D98": "higher",
     "D2": "lower",
@@ -23,6 +24,7 @@ METRIC_CRITERIA = {
     "V20": "lower",
     "V5": "lower",
     "V10": "lower",
+    "CI": "higher",       # Conformity Index
 }
 
 def better_value(old, new, metric):
@@ -79,6 +81,7 @@ if uploaded_file:
     # ============================================================
     df["Struttura"] = ""
     metric_map = {}  # struttura -> lista metriche
+    metric_column_map = {}  # struttura -> dict metric -> colonna originale
 
     for i, vol_col in enumerate(vol_cols):
         struttura_nome = vol_col.replace("(vol)", "").strip()
@@ -90,8 +93,21 @@ if uploaded_file:
             idx_end = df.columns.get_loc(vol_cols[i + 1])
 
         # 🔹 Solo colonne numeriche come metriche (esclude 'Struttura')
-        metric_cols = [c for c in df.columns[idx_start:idx_end] if pd.api.types.is_numeric_dtype(df[c])]
+        metric_cols_full = [c for c in df.columns[idx_start:idx_end] if pd.api.types.is_numeric_dtype(df[c])]
+
+        # 🔹 Estrai nome metrica dalle parentesi
+        metric_cols = []
+        metric_to_col = {}
+        for col in metric_cols_full:
+            if "(" in col and ")" in col:
+                metric_name = col.split("(")[1].split(")")[0].strip()
+            else:
+                metric_name = col.strip()
+            metric_cols.append(metric_name)
+            metric_to_col[metric_name] = col
+
         metric_map[struttura_nome] = metric_cols
+        metric_column_map[struttura_nome] = metric_to_col
 
     st.info(f"Strutture trovate: {list(metric_map.keys())}")
     for s, m in metric_map.items():
@@ -113,13 +129,14 @@ if uploaded_file:
             subset = subset[subset[col_id] == id_val]
             if subset.empty:
                 continue
+            metric_to_col = metric_column_map[struct]
             for metric in metrics:
                 old_row = subset[subset["TipoPiano"] == "Vecchio"]
                 new_row = subset[subset["TipoPiano"] == "Nuovo"]
                 if old_row.empty or new_row.empty:
                     continue
-                old_value = old_row.iloc[0][metric]
-                new_value = new_row.iloc[0][metric]
+                old_value = old_row.iloc[0][metric_to_col[metric]]
+                new_value = new_row.iloc[0][metric_to_col[metric]]
                 winner = better_value(old_value, new_value, metric)
                 results.append({
                     "ID": id_val,
