@@ -14,8 +14,7 @@ METRIC_CRITERIA = {
     "V20": "lower","V5": "lower","V10": "lower",
     "CI": "higher"
 }
-
-EQUIV_THRESHOLD = 0.01  ### soglia 1%
+EQUIV_THRESHOLD = 0.01  # soglia 1%
 
 def better_value(old, new, metric):
     if pd.isna(old) or pd.isna(new): return "N/A"
@@ -29,33 +28,16 @@ def better_value(old, new, metric):
         return "Nuovo" if new > old else "Vecchio"
 
 # ============================================================
-# 2) Preset strutture per distretti
-# ============================================================
-PRESETS = {
-    "Thorax": ["PTV", "Heart", "Lung"],
-    "Head and Neck": ["PTV", "SpinalCord", "BrainStem", "Parotid_R", "Parotid_L"],
-    "Breast": ["PTV", "Heart", "Lung"],
-    "Abdomen": ["PTV", "Liver", "Kidney_R", "Kidney_L", "SpinalCord"],
-    "Prostate": ["PTV", "Bladder", "Rectum", "FemoralHeads_R", "FemoralHeads_L"],
-    "Pelvis": ["PTV", "Bladder", "Rectum", "FemoralHeads_R", "FemoralHeads_L"]
-}
-
-# ============================================================
-# Streamlit UI
-# ============================================================
 st.title("🔬 Analisi Dose Hunter – Multi-Struttura e Multi-Metrica")
 
 uploaded_file = st.file_uploader("Carica file Excel Dose Hunter", type=["xlsx"])
+
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
 
     # ============================================================
-    # IDENTIFICAZIONE COLONNE
+    # TROVA STRUTTURE BASATE SU COLONNE (vol) - VERSIONE OTTIMIZZATA
     # ============================================================
-    col_id = [c for c in df.columns if "id" in c.lower()][0]
-    col_plan = [c for c in df.columns if "plan" in c.lower()][0]
-
-    # Trova tutte le strutture basate sulle colonne (vol)
     vol_cols = [c for c in df.columns if "(vol)" in c.lower()]
     df["Struttura"] = None
 
@@ -63,49 +45,65 @@ if uploaded_file:
     metric_column_map = {}
 
     for vol_col in vol_cols:
-        # Nome struttura
-        struct = vol_col.lower().replace("(vol)", "").strip().title()
+        # Nome struttura così com'è nel file Excel
+        struct = vol_col.replace("(vol)", "").strip()
         
-        # Colonne della struttura: contiene il nome struttura senza spazi
-        struct_cols = [c for c in df.columns if struct.lower().replace(" ","") in c.lower().replace(" ","")]
-        
+        # Trova tutte le colonne che contengono il nome della struttura (esclusa colonna (vol))
+        struct_cols = [c for c in df.columns if struct in c and c != vol_col]
+
         metrics = []
         m_to_c = {}
         for col in struct_cols:
-            if col == vol_col:  # ignoriamo colonna (vol)
-                continue
-            # Estrazione nome metrica
+            # Estrai la metrica tra parentesi se presente
             if "(" in col and ")" in col:
                 met = col.split("(")[1].split(")")[0].strip()
             else:
-                met = col.replace(struct, "").replace("(","").replace(")","").strip()
+                met = col.replace(struct, "").strip()
             metrics.append(met)
             m_to_c[met] = col
 
         # Assegna struttura nelle righe dove (vol) non è NaN
         mask = df[vol_col].notna()
-        df.loc[mask,"Struttura"] = struct
+        df.loc[mask, "Struttura"] = struct
 
         metric_map[struct] = metrics
         metric_column_map[struct] = m_to_c
 
+    # Controllo rapido
+    st.write("Strutture trovate:", list(metric_map.keys()))
+
     # ============================================================
-    # NUOVO vs VECCHIO
+    # Tipo Piano Nuovo vs Vecchio
     # ============================================================
+    plan_cols = [c for c in df.columns if "plan" in c.lower()]
+    col_plan = plan_cols[0] if plan_cols else "planID"
+    id_cols = [c for c in df.columns if "id" in c.lower()]
+    col_id = id_cols[0] if id_cols else "patientID"
+
     df["TipoPiano"] = df[col_plan].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
 
     results = []
     for id_val in df[col_id].unique():
         temp = df[df[col_id]==id_val]
+
         for struct, metrics in metric_map.items():
             sub = temp[temp["Struttura"]==struct]
             if sub.empty: continue
+
             for m in metrics:
                 col = metric_column_map[struct][m]
-                v_old = sub[sub["TipoPiano"]=="Vecchio"][col].iloc[0]
-                v_new = sub[sub["TipoPiano"]=="Nuovo"][col].iloc[0]
+                try:
+                    v_old = sub[sub["TipoPiano"]=="Vecchio"][col].iloc[0]
+                except IndexError:
+                    v_old = np.nan
+                try:
+                    v_new = sub[sub["TipoPiano"]=="Nuovo"][col].iloc[0]
+                except IndexError:
+                    v_new = np.nan
+
                 winner = better_value(v_old,v_new,m)
-                diff_pct = ((v_new - v_old)/v_old*100 if v_old!=0 else 0)
+                diff_pct = ((v_new - v_old)/v_old*100 if v_old and not pd.isna(v_old) else 0)
+
                 results.append({
                     "ID": id_val,
                     "Struttura": struct,
@@ -119,18 +117,28 @@ if uploaded_file:
     results_df = pd.DataFrame(results)
 
     # ============================================================
-    # FILTRI INTERATTIVI
+    # Preset strutture per distretti
     # ============================================================
+    PRESETS = {
+        "Thorax": ["PTV", "Heart", "Lung"],
+        "Head and Neck": ["PTV", "SpinalCord", "ParotidL", "ParotidR"],
+        "Breast": ["PTV", "Heart", "Lung", "ContralateralBreast"],
+        "Abdomen": ["PTV", "Liver", "KidneyL", "KidneyR", "Bowel"],
+        "Prostate": ["PTV", "Bladder", "Rectum", "FemoralL", "FemoralR"],
+        "Pelvi": ["PTV", "Bladder", "Rectum", "FemoralL", "FemoralR"]
+    }
+
     st.sidebar.header("🔍 Filtri")
-    
+
     # Selezione preset
-    preset_sel = st.sidebar.selectbox("Seleziona preset distretto", ["Custom"] + list(PRESETS.keys()))
-    if preset_sel != "Custom":
-        structs_sel = PRESETS[preset_sel]
+    preset_choice = st.sidebar.selectbox("Scegli preset distretto", ["Custom"] + list(PRESETS.keys()))
+    if preset_choice != "Custom":
+        structs_sel = PRESETS[preset_choice]
     else:
-        structs_sel = st.sidebar.multiselect("Select structures", results_df["Struttura"].unique(), default=None)
-    
-    metrics_sel = st.sidebar.multiselect("Select metrics", results_df["Metrica"].unique(), default=None)
+        structs_sel = st.sidebar.multiselect("Seleziona strutture", results_df["Struttura"].unique(), default=None)
+
+    # Selezione metriche
+    metrics_sel = st.sidebar.multiselect("Seleziona metriche", results_df["Metrica"].unique(), default=None)
 
     results_filtered = results_df.copy()
     if structs_sel:
@@ -139,18 +147,19 @@ if uploaded_file:
         results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
 
     # ============================================================
-    # SEPARAZIONE PTV vs OAR
+    # Separazione PTV vs OAR
     # ============================================================
     PTV_df = results_filtered[results_filtered["Struttura"].str.contains("PTV", case=False)]
     OAR_df = results_filtered[~results_filtered["Struttura"].str.contains("PTV", case=False)]
 
     st.subheader("📊 Risultati PTV")
     st.dataframe(PTV_df)
+
     st.subheader("🫁 Risultati OAR")
     st.dataframe(OAR_df)
 
     # ============================================================
-    # WILCOXON
+    # Wilcoxon
     # ============================================================
     wilcox = []
     for struct in results_filtered["Struttura"].unique():
@@ -158,7 +167,7 @@ if uploaded_file:
             vals = results_filtered[(results_filtered["Struttura"]==struct)&(results_filtered["Metrica"]==met)]
             if len(vals) < 2: continue
             try:
-                stat,p = wilcoxon(vals["Valore Vecchio"], vals["Valore Nuovo"])
+                stat,p = wilcoxon(vals["Valore Vecchio"].fillna(0), vals["Valore Nuovo"].fillna(0))
             except:
                 stat,p = None,None
             wilcox.append([struct,met,stat,p])
@@ -166,7 +175,7 @@ if uploaded_file:
     wilcox_df = pd.DataFrame(wilcox,columns=["Struttura","Metrica","Statistic","p-value"])
     wilcox_df["Significativo"] = wilcox_df["p-value"] < 0.05
 
-    show_only_sig = st.sidebar.checkbox("Show only significant metrics (p < 0.05)")
+    show_only_sig = st.sidebar.checkbox("Mostra solo metriche significative (p < 0.05)")
     if show_only_sig:
         results_filtered = results_filtered.merge(
             wilcox_df[wilcox_df["Significativo"]],on=["Struttura","Metrica"]
@@ -176,13 +185,14 @@ if uploaded_file:
     st.dataframe(wilcox_df)
 
     # ============================================================
-    # EXPORT EXCEL
+    # Export Excel
     # ============================================================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         PTV_df.to_excel(writer,"PTV",index=False)
         OAR_df.to_excel(writer,"OAR",index=False)
         wilcox_df.to_excel(writer,"Wilcoxon",index=False)
+
     st.download_button(
         "📥 Scarica Excel completo",
         data = output.getvalue(),
@@ -190,11 +200,12 @@ if uploaded_file:
     )
 
     # ============================================================
-    # RISULTATO FINALE
+    # Risultato finale
     # ============================================================
     st.subheader("🏁 RISULTATO FINALE")
     summary = results_filtered["Migliore"].value_counts()
     st.write(summary)
+
     if summary.get("Nuovo",0) > summary.get("Vecchio",0):
         st.success("🎉 Il nuovo modello RapidPlan risulta complessivamente migliore!")
     else:
