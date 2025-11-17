@@ -36,44 +36,18 @@ if uploaded_file:
     df = pd.read_excel(uploaded_file)
 
     # ============================================================
-    # TROVA STRUTTURE BASATE SU COLONNE (vol) - VERSIONE ROBUSTA
+    # IDENTIFICAZIONE STRUTTURE BASATA SUI PREFISSI DELLE COLONNE
     # ============================================================
-    vol_cols = [c for c in df.columns if "(vol)" in c.lower()]
-    df["Struttura"] = None
+    structures = {}
+    for col in df.columns:
+        if "(" in col and ")" in col:
+            struct = col.split("(")[0].strip().title()  # tutto prima della parentesi
+            metric = col.split("(")[1].split(")")[0].strip()
+            if struct not in structures:
+                structures[struct] = {}
+            structures[struct][metric] = col
 
-    metric_map = {}
-    metric_column_map = {}
-
-    for vol_col in vol_cols:
-        struct_raw = vol_col.replace("(vol)", "").strip()
-        struct_name = struct_raw.title()
-
-        # Trova tutte le colonne che contengono il nome della struttura
-        struct_cols = [c for c in df.columns if struct_raw in c and c != vol_col]
-
-        metrics = []
-        m_to_c = {}
-        for col in struct_cols:
-            if "(" in col and ")" in col:
-                met = col.split("(")[1].split(")")[0].strip()
-            else:
-                met = col.replace(struct_raw, "").strip()
-            metrics.append(met)
-            m_to_c[met] = col
-
-        # Assegna struttura alle righe dove almeno una metrica della struttura non è NaN
-        if struct_cols:
-            mask = df[struct_cols].notna().any(axis=1)
-            df.loc[mask, "Struttura"] = struct_name
-
-        metric_map[struct_name] = metrics
-        metric_column_map[struct_name] = m_to_c
-
-    # Normalizza la colonna Struttura
-    df["Struttura"] = df["Struttura"].str.strip().str.title()
-
-    # Controllo rapido
-    st.write("Strutture trovate:", list(metric_map.keys()))
+    st.write("Strutture trovate:", list(structures.keys()))
 
     # ============================================================
     # Tipo Piano Nuovo vs Vecchio
@@ -86,36 +60,24 @@ if uploaded_file:
     df["TipoPiano"] = df[col_plan].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
 
     # ============================================================
-    # Calcolo risultati per ogni ID e struttura
+    # Creazione risultati
     # ============================================================
     results = []
     for id_val in df[col_id].unique():
-        temp = df[df[col_id]==id_val]
+        temp = df[df[col_id] == id_val]
 
-        for struct in metric_map.keys():
-            struct_norm = struct.strip().title()
-            sub = temp[temp["Struttura"] == struct_norm]
-            if sub.empty: 
-                continue
+        for struct, metrics in structures.items():
+            for met, col in metrics.items():
+                v_old = temp[temp["TipoPiano"]=="Vecchio"][col].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
+                v_new = temp[temp["TipoPiano"]=="Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
 
-            for m in metric_map[struct]:
-                col = metric_column_map[struct][m]
-                try:
-                    v_old = sub[sub["TipoPiano"]=="Vecchio"][col].iloc[0]
-                except IndexError:
-                    v_old = np.nan
-                try:
-                    v_new = sub[sub["TipoPiano"]=="Nuovo"][col].iloc[0]
-                except IndexError:
-                    v_new = np.nan
-
-                winner = better_value(v_old,v_new,m)
+                winner = better_value(v_old, v_new, met)
                 diff_pct = ((v_new - v_old)/v_old*100 if v_old and not pd.isna(v_old) else 0)
 
                 results.append({
                     "ID": id_val,
-                    "Struttura": struct_norm,
-                    "Metrica": m,
+                    "Struttura": struct,
+                    "Metrica": met,
                     "Valore Vecchio": v_old,
                     "Valore Nuovo": v_new,
                     "Δ %": diff_pct,
@@ -125,7 +87,7 @@ if uploaded_file:
     results_df = pd.DataFrame(results)
 
     # ============================================================
-    # Preset strutture per distretti
+    # Sidebar Filtri
     # ============================================================
     PRESETS = {
         "Thorax": ["PTV", "Heart", "Lung"],
@@ -137,7 +99,6 @@ if uploaded_file:
     }
 
     st.sidebar.header("🔍 Filtri")
-
     preset_choice = st.sidebar.selectbox("Scegli preset distretto", ["Custom"] + list(PRESETS.keys()))
     if preset_choice != "Custom":
         structs_sel = PRESETS[preset_choice]
