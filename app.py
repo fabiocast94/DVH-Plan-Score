@@ -41,7 +41,7 @@ if uploaded_file:
     structures = {}
     for col in df.columns:
         if "(" in col and ")" in col:
-            struct = col.split("(")[0].strip().title()  # tutto prima della parentesi
+            struct = col.split("(")[0].strip()  # tutto prima della parentesi
             metric = col.split("(")[1].split(")")[0].strip()
             if struct not in structures:
                 structures[struct] = {}
@@ -85,6 +85,7 @@ if uploaded_file:
                 })
 
     results_df = pd.DataFrame(results)
+    results_df["Struttura_upper"] = results_df["Struttura"].str.upper()  # per confronto con preset
 
     # ============================================================
     # Sidebar Filtri
@@ -97,27 +98,28 @@ if uploaded_file:
         "Prostate": ["PTV", "Bladder", "Rectum", "FemoralL", "FemoralR"],
         "Pelvi": ["PTV", "Bladder", "Rectum", "FemoralL", "FemoralR"]
     }
+    PRESETS_UPPER = {k: [s.upper() for s in v] for k,v in PRESETS.items()}
 
     st.sidebar.header("🔍 Filtri")
     preset_choice = st.sidebar.selectbox("Scegli preset distretto", ["Custom"] + list(PRESETS.keys()))
     if preset_choice != "Custom":
-        structs_sel = PRESETS[preset_choice]
+        structs_sel_upper = PRESETS_UPPER[preset_choice]
     else:
-        structs_sel = st.sidebar.multiselect("Seleziona strutture", results_df["Struttura"].unique(), default=None)
+        structs_sel_upper = [s.upper() for s in st.sidebar.multiselect("Seleziona strutture", results_df["Struttura"].unique(), default=None)]
 
     metrics_sel = st.sidebar.multiselect("Seleziona metriche", results_df["Metrica"].unique(), default=None)
 
     results_filtered = results_df.copy()
-    if structs_sel:
-        results_filtered = results_filtered[results_filtered["Struttura"].isin(structs_sel)]
+    if structs_sel_upper:
+        results_filtered = results_filtered[results_filtered["Struttura_upper"].isin(structs_sel_upper)]
     if metrics_sel:
         results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
 
     # ============================================================
     # Separazione PTV vs OAR
     # ============================================================
-    PTV_df = results_filtered[results_filtered["Struttura"].str.contains("PTV", case=False)]
-    OAR_df = results_filtered[~results_filtered["Struttura"].str.contains("PTV", case=False)]
+    PTV_df = results_filtered[results_filtered["Struttura"].str.upper().str.contains("PTV")]
+    OAR_df = results_filtered[~results_filtered["Struttura"].str.upper().str.contains("PTV")]
 
     st.subheader("📊 Risultati PTV")
     st.dataframe(PTV_df)
