@@ -6,3 +6,5 @@ plotly
 openpyxl
 seaborn
 matplotlib
+rapidfuzz
+
