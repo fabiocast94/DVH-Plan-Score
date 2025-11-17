@@ -2,16 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.stats import wilcoxon
-import plotly.graph_objects as go
-import seaborn as sns
-import matplotlib.pyplot as plt
 from io import BytesIO
-
-# Import opzionale rapidfuzz
-try:
-    from rapidfuzz import process, fuzz
-except ImportError:
-    st.warning("Il pacchetto 'rapidfuzz' non è installato. Alcune funzionalità di matching automatico delle strutture potrebbero non funzionare.")
 
 # ============================================================
 # 1) CRITERI METRICHE
@@ -24,37 +15,39 @@ METRIC_CRITERIA = {
     "CI": "higher"
 }
 
-EQUIV_THRESHOLD = 0.01  ### 🔶 NUOVA SOGLIA 1%
+EQUIV_THRESHOLD = 0.01  ### 1% threshold
 
 def better_value(old, new, metric):
     if pd.isna(old) or pd.isna(new): return "N/A"
     crit = METRIC_CRITERIA.get(metric,"lower")
     rel_diff = abs(new - old) / old if old != 0 else 0
     if rel_diff < EQUIV_THRESHOLD:
-        return "Equivalente"
+        return "Equivalent"
     if crit == "lower":
-        return "Nuovo" if new < old else "Vecchio"
+        return "New" if new < old else "Old"
     else:
-        return "Nuovo" if new > old else "Vecchio"
+        return "New" if new > old else "Old"
 
 # ============================================================
-# Preset strutture per distretti
+# Preset structures (English names)
 # ============================================================
 PRESET_STRUCTURES = {
     "PTV": ["PTV_High", "PTV_Low", "PTV_Boost"],
     "OAR": ["Lung_L", "Lung_R", "Heart", "SpinalCord", "Esophagus", "Breast"]
 }
 
-# ============================================================
-st.title("🔬 Analisi Multi-Struttura e Multi-Metrica")
+ALL_STRUCTURES = [s for lst in PRESET_STRUCTURES.values() for s in lst]
 
-uploaded_file = st.file_uploader("Carica file Excel", type=["xlsx"])
+# ============================================================
+st.title("🔬 Dose Hunter Analysis – Multi-Structure & Multi-Metric")
+
+uploaded_file = st.file_uploader("Upload Excel file Dose Hunter", type=["xlsx"])
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
 
     # ============================================================
-    # IDENTIFICAZIONE COLONNE
+    # IDENTIFY COLUMNS
     # ============================================================
     possible_id = [c for c in df.columns if "id" in c.lower()]
     col_id = possible_id[0] if possible_id else None
@@ -89,101 +82,106 @@ if uploaded_file:
         metric_column_map[struct] = m_to_c
 
     # ============================================================
-    # NUOVO vs VECCHIO
+    # NEW vs OLD
     # ============================================================
     if col_plan:
-        df["TipoPiano"] = df[col_plan].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
+        df["PlanType"] = df[col_plan].apply(lambda x: "New" if "new" in str(x).lower() else "Old")
     else:
-        df["TipoPiano"] = "Unknown"
+        df["PlanType"] = "Unknown"
 
     results = []
-    for id_val in df[col_id].unique():
-        temp = df[df[col_id]==id_val]
+    if col_id:
+        for id_val in df[col_id].unique():
+            temp = df[df[col_id]==id_val]
 
-        for struct, metrics in metric_map.items():
-            sub = temp[temp["Struttura"]==struct]
-            if sub.empty: continue
+            for struct, metrics in metric_map.items():
+                sub = temp[temp["Struttura"]==struct]
+                if sub.empty: continue
 
-            for m in metrics:
-                col = metric_column_map[struct][m]
+                for m in metrics:
+                    col = metric_column_map[struct][m]
 
-                v_old = sub[sub["TipoPiano"]=="Vecchio"][col].iloc[0] if not sub[sub["TipoPiano"]=="Vecchio"].empty else np.nan
-                v_new = sub[sub["TipoPiano"]=="Nuovo"][col].iloc[0] if not sub[sub["TipoPiano"]=="Nuovo"].empty else np.nan
+                    v_old = sub[sub["PlanType"]=="Old"][col].iloc[0] if not sub[sub["PlanType"]=="Old"].empty else np.nan
+                    v_new = sub[sub["PlanType"]=="New"][col].iloc[0] if not sub[sub["PlanType"]=="New"].empty else np.nan
 
-                winner = better_value(v_old,v_new,m)
-                diff_pct = ((v_new - v_old)/v_old*100 if v_old!=0 else 0)
+                    winner = better_value(v_old,v_new,m)
+                    diff_pct = ((v_new - v_old)/v_old*100 if v_old!=0 else 0)
 
-                results.append({
-                    "ID": id_val,
-                    "Struttura": struct,
-                    "Metrica": m,
-                    "Valore Vecchio": v_old,
-                    "Valore Nuovo": v_new,
-                    "Δ %": diff_pct,
-                    "Migliore": winner
-                })
+                    results.append({
+                        "ID": id_val,
+                        "Structure": struct,
+                        "Metric": m,
+                        "Old Value": v_old,
+                        "New Value": v_new,
+                        "Δ %": diff_pct,
+                        "Better": winner
+                    })
 
     results_df = pd.DataFrame(results)
 
     # ============================================================
-    # FILTRI INTERATTIVI
+    # FILTERS (always show all preset structures)
     # ============================================================
-    st.sidebar.header("🔍 Filtri")
+    st.sidebar.header("🔍 Filters")
 
     structs_sel = st.sidebar.multiselect(
-        "Seleziona strutture", results_df["Struttura"].unique(), default=None
+        "Select structures",
+        options=ALL_STRUCTURES,
+        default=None
     )
 
     metrics_sel = st.sidebar.multiselect(
-        "Seleziona metriche", results_df["Metrica"].unique(), default=None
+        "Select metrics",
+        options=results_df["Metric"].unique(),
+        default=None
     )
 
     results_filtered = results_df.copy()
     if structs_sel:
-        results_filtered = results_filtered[results_filtered["Struttura"].isin(structs_sel)]
+        results_filtered = results_filtered[results_filtered["Structure"].isin(structs_sel)]
     if metrics_sel:
-        results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
+        results_filtered = results_filtered[results_filtered["Metric"].isin(metrics_sel)]
 
     # ============================================================
-    # SEPARAZIONE PTV vs OAR
+    # PTV vs OAR separation
     # ============================================================
-    PTV_df = results_filtered[results_filtered["Struttura"].str.contains("PTV", case=False)]
-    OAR_df = results_filtered[~results_filtered["Struttura"].str.contains("PTV", case=False)]
+    PTV_df = results_filtered[results_filtered["Structure"].str.contains("PTV", case=False)]
+    OAR_df = results_filtered[~results_filtered["Structure"].str.contains("PTV", case=False)]
 
-    st.subheader("📊 Risultati PTV")
+    st.subheader("📊 PTV Results")
     st.dataframe(PTV_df)
 
-    st.subheader("🫁 Risultati OAR")
+    st.subheader("🫁 OAR Results")
     st.dataframe(OAR_df)
 
     # ============================================================
-    # WILCOXON + SIGNIFICATIVITÀ
+    # Wilcoxon test
     # ============================================================
     wilcox = []
-    for struct in results_filtered["Struttura"].unique():
-        for met in results_filtered["Metrica"].unique():
-            vals = results_filtered[(results_filtered["Struttura"]==struct)&(results_filtered["Metrica"]==met)]
+    for struct in results_filtered["Structure"].unique():
+        for met in results_filtered["Metric"].unique():
+            vals = results_filtered[(results_filtered["Structure"]==struct)&(results_filtered["Metric"]==met)]
             if len(vals) < 2: continue
             try:
-                stat,p = wilcoxon(vals["Valore Vecchio"], vals["Valore Nuovo"])
+                stat,p = wilcoxon(vals["Old Value"], vals["New Value"])
             except:
                 stat,p = None,None
             wilcox.append([struct,met,stat,p])
 
-    wilcox_df = pd.DataFrame(wilcox,columns=["Struttura","Metrica","Statistic","p-value"])
-    wilcox_df["Significativo"] = wilcox_df["p-value"] < 0.05
+    wilcox_df = pd.DataFrame(wilcox,columns=["Structure","Metric","Statistic","p-value"])
+    wilcox_df["Significant"] = wilcox_df["p-value"] < 0.05
 
-    show_only_sig = st.sidebar.checkbox("Mostra solo metriche significative (p < 0.05)")
+    show_only_sig = st.sidebar.checkbox("Show only significant metrics (p < 0.05)")
     if show_only_sig:
         results_filtered = results_filtered.merge(
-            wilcox_df[wilcox_df["Significativo"]],on=["Struttura","Metrica"]
+            wilcox_df[wilcox_df["Significant"]],on=["Structure","Metric"]
         )
 
-    st.subheader("📊 Risultati Wilcoxon")
+    st.subheader("📊 Wilcoxon Results")
     st.dataframe(wilcox_df)
 
     # ============================================================
-    # EXPORT EXCEL
+    # Export Excel
     # ============================================================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -192,20 +190,20 @@ if uploaded_file:
         wilcox_df.to_excel(writer,"Wilcoxon",index=False)
 
     st.download_button(
-        "📥 Scarica Excel completo",
+        "📥 Download full Excel",
         data = output.getvalue(),
-        file_name="Analisi_RapidPlan_Advanced.xlsx"
+        file_name="DoseHunter_Analysis.xlsx"
     )
 
     # ============================================================
-    # RISULTATO FINALE
+    # FINAL SUMMARY
     # ============================================================
-    st.subheader("🏁 RISULTATO FINALE")
+    st.subheader("🏁 FINAL RESULT")
 
-    summary = results_filtered["Migliore"].value_counts()
+    summary = results_filtered["Better"].value_counts()
     st.write(summary)
 
-    if summary.get("Nuovo",0) > summary.get("Vecchio",0):
-        st.success("🎉 Il nuovo modello RapidPlan risulta complessivamente migliore!")
+    if summary.get("New",0) > summary.get("Old",0):
+        st.success("🎉 The new RapidPlan model is overall better!")
     else:
-        st.error("⚠️ Il modello vecchio sembra migliore su queste metriche.")
+        st.error("⚠️ The old model seems better based on these metrics.")
