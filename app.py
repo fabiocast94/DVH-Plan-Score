@@ -7,217 +7,195 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from io import BytesIO
 
-# =========================================================
-# ⚙️ 1) CRITERI MIGLIORAMENTO PER METRICA
-# =========================================================
+# ============================================================
+# 1) CRITERI METRICHE
+# ============================================================
 METRIC_CRITERIA = {
-    "HI": "lower",
-    "D95": "higher",
-    "D98": "higher",
-    "D2": "lower",
-    "D50": "lower",
-    "Dmax": "lower",
-    "Dmean": "lower",
-    "V95": "higher",
-    "V90": "higher",
-    "V107": "lower",
-    "V20": "lower",
-    "V5": "lower",
-    "V10": "lower",
-    "CI": "higher",
+    "HI": "lower", "D95": "higher", "D98": "higher", "D2": "lower",
+    "D50": "lower", "Dmax": "lower", "Dmean": "lower",
+    "V95": "higher","V90": "higher","V107": "lower",
+    "V20": "lower","V5": "lower","V10": "lower",
+    "CI": "higher"
 }
 
+EQUIV_THRESHOLD = 0.01  ### 🔶 NUOVA SOGLIA 1%
+
 def better_value(old, new, metric):
-    crit = METRIC_CRITERIA.get(metric, "lower")
-    if pd.isna(old) or pd.isna(new):
-        return "N/A"
+    if pd.isna(old) or pd.isna(new): return "N/A"
+
+    crit = METRIC_CRITERIA.get(metric,"lower")
+    rel_diff = abs(new - old) / old if old != 0 else 0
+
+    if rel_diff < EQUIV_THRESHOLD:
+        return "Equivalente"
+
     if crit == "lower":
         return "Nuovo" if new < old else "Vecchio"
-    return "Nuovo" if new > old else "Vecchio"
+    else:
+        return "Nuovo" if new > old else "Vecchio"
 
-# =========================================================
-# 🧠 2) CLASSIFICATORE STRUTTURE
-# =========================================================
-def classify_structure(name):
-    name_low = name.lower()
 
-    if any(x in name_low for x in ["ptv", "ctv", "gtv", "boost"]):
-        return "PTV"
+# ============================================================
+st.title("🔬 Analisi Dose Hunter – Multi-Struttura e Multi-Metrica")
 
-    if "breast" in name_low or "mamma" in name_low:
-        return "BREAST"
+uploaded_file = st.file_uploader("Carica file Excel Dose Hunter", type=["xlsx"])
 
-    if any(x in name_low for x in ["lens", "lung", "heart", "kidney", "rectum",
-                                   "bladder", "esophagus", "trachea", "liver",
-                                   "spinal", "optic", "chiasm", "parotid"]):
-        return "OAR"
+if uploaded_file:
+    df = pd.read_excel(uploaded_file)
 
-    return "OAR"
+    # ============================================================
+    # IDENTIFICAZIONE COLONNE
+    # ============================================================
+    possible_id = [c for c in df.columns if "id" in c.lower()]
+    col_id = possible_id[0]
 
-# =========================================================
-# 🚀 3) STREAMLIT UI
-# =========================================================
-st.title("🧠 Analisi RapidPlan – Multi-Struttura")
+    possible_plan = [c for c in df.columns if "plan" in c.lower()]
+    col_plan = possible_plan[0]
 
-uploaded_file = st.file_uploader("Carica file Dose Hunter (.xlsx)", type=["xlsx"])
+    vol_cols = [c for c in df.columns if "(vol)" in c.lower()]
+    df["Struttura"] = None
 
-if not uploaded_file:
-    st.stop()
+    metric_map = {}
+    metric_column_map = {}
 
-df = pd.read_excel(uploaded_file)
-st.write("📁 Anteprima:")
-st.dataframe(df.head())
+    for i, vol in enumerate(vol_cols):
+        struct = vol.replace("(vol)", "").strip()
 
-# =========================================================
-# 🔍 4) IDENTIFICAZIONE COLONNE
-# =========================================================
-id_col = [c for c in df.columns if "id" in c.lower()][0]
-plan_col = [c for c in df.columns if "plan" in c.lower()][0]
-vol_cols = [c for c in df.columns if "(vol)" in c.lower()]
+        mask = df[vol].notna()
+        df.loc[mask,"Struttura"] = struct
 
-df["TipoPiano"] = df[plan_col].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
+        start = df.columns.get_loc(vol)+1
+        end = df.columns.get_loc(vol_cols[i+1]) if i+1 < len(vol_cols) else df.shape[1]
 
-metric_map = {}
-metric_column_map = {}
-structure_assignment = {}
+        metrics = []
+        m_to_c = {}
 
-for i, vol in enumerate(vol_cols):
-    struct = vol.replace("(vol)", "").strip()
-    class_type = classify_structure(struct)
-    structure_assignment[struct] = class_type
+        for col in df.columns[start:end]:
+            if not pd.api.types.is_numeric_dtype(df[col]): continue
+            name = col.split("(")[1].split(")")[0] if "(" in col else col
+            metrics.append(name)
+            m_to_c[name] = col
 
-    idx_start = df.columns.get_loc(vol) + 1
-    idx_end = df.columns.get_loc(vol_cols[i+1]) if i+1 < len(vol_cols) else df.shape[1]
+        metric_map[struct] = metrics
+        metric_column_map[struct] = m_to_c
 
-    metric_cols = [c for c in df.columns[idx_start:idx_end] if pd.api.types.is_numeric_dtype(df[c])]
-    metric_clean = {}
-    clean_names = []
 
-    for m in metric_cols:
-        if "(" in m:
-            name = m.split("(")[1].split(")")[0]
-        else:
-            name = m
-        clean_names.append(name)
-        metric_clean[name] = m
+    # ============================================================
+    # NUOVO vs VECCHIO
+    # ============================================================
+    df["TipoPiano"] = df[col_plan].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
 
-    metric_map[struct] = clean_names
-    metric_column_map[struct] = metric_clean
+    results = []
+    for id_val in df[col_id].unique():
+        temp = df[df[col_id]==id_val]
 
-# =========================================================
-# 🧮 5) COSTRUZIONE RISULTATI
-# =========================================================
-results = []
+        for struct, metrics in metric_map.items():
+            sub = temp[temp["Struttura"]==struct]
+            if sub.empty: continue
 
-for pid in df[id_col].unique():
-    for struct in metric_map:
-        subset = df[df[id_col] == pid]
+            for m in metrics:
+                col = metric_column_map[struct][m]
 
-        for metric in metric_map[struct]:
-            col = metric_column_map[struct][metric]
+                v_old = sub[sub["TipoPiano"]=="Vecchio"][col].iloc[0]
+                v_new = sub[sub["TipoPiano"]=="Nuovo"][col].iloc[0]
 
-            old = subset[subset["TipoPiano"] == "Vecchio"]
-            new = subset[subset["TipoPiano"] == "Nuovo"]
-            if old.empty or new.empty:
-                continue
+                winner = better_value(v_old,v_new,m)
+                diff_pct = ((v_new - v_old)/v_old*100 if v_old!=0 else 0)
 
-            oldv = old.iloc[0][col]
-            newv = new.iloc[0][col]
-            better = better_value(oldv, newv, metric)
+                results.append({
+                    "ID": id_val,
+                    "Struttura": struct,
+                    "Metrica": m,
+                    "Valore Vecchio": v_old,
+                    "Valore Nuovo": v_new,
+                    "Δ %": diff_pct,
+                    "Migliore": winner
+                })
 
-            results.append({
-                "ID": pid,
-                "Struttura": struct,
-                "Metrica": metric,
-                "Classe": structure_assignment[struct],
-                "Old": oldv,
-                "New": newv,
-                "Migliore": better
-            })
+    results_df = pd.DataFrame(results)
 
-results_df = pd.DataFrame(results)
-st.success(f"📊 RISULTATI GENERATI ({len(results_df)} confronti)")
+    # ============================================================
+    # 🔶 1️⃣ FILTRI INTERATTIVI
+    # ============================================================
+    st.sidebar.header("🔍 Filtri")
 
-# =========================================================
-# 📈 6) RADAR PLOT
-# =========================================================
-st.subheader("📈 Radar Plot ")
+    structs_sel = st.sidebar.multiselect(
+        "Seleziona strutture", results_df["Struttura"].unique(), default=None
+    )
 
-sel_id = st.selectbox("Seleziona ID", results_df["ID"].unique())
-sel_struct = st.selectbox("Seleziona Struttura", results_df["Struttura"].unique())
+    metrics_sel = st.sidebar.multiselect(
+        "Seleziona metriche", results_df["Metrica"].unique(), default=None
+    )
 
-rad = results_df[(results_df["ID"] == sel_id) & (results_df["Struttura"] == sel_struct)]
+    results_filtered = results_df.copy()
 
-fig = go.Figure()
-fig.add_trace(go.Scatterpolar(r=rad["Old"], theta=rad["Metrica"], fill='toself', name="Vecchio"))
-fig.add_trace(go.Scatterpolar(r=rad["New"], theta=rad["Metrica"], fill='toself', name="Nuovo"))
+    if structs_sel:
+        results_filtered = results_filtered[results_filtered["Struttura"].isin(structs_sel)]
+    if metrics_sel:
+        results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
 
-st.plotly_chart(fig)
+    # ============================================================
+    # 🔶 1️⃣ SEPARAZIONE PTV vs OAR
+    # ============================================================
+    PTV_df = results_filtered[results_filtered["Struttura"].str.contains("PTV", case=False)]
+    OAR_df = results_filtered[~results_filtered["Struttura"].str.contains("PTV", case=False)]
 
-# =========================================================
-# 🔥 7) HEATMAP PTV & OAR
-# =========================================================
-def make_heatmap(class_type, title):
+    st.subheader("📊 Risultati PTV")
+    st.dataframe(PTV_df)
 
-    pvt = results_df[results_df["Classe"] == class_type]
-    if pvt.empty:
-        st.warning(f"Nessun dato per {title}")
-        return
+    st.subheader("🫁 Risultati OAR")
+    st.dataframe(OAR_df)
 
-    pivot = pvt.pivot_table(index="ID", columns=["Struttura", "Metrica"], values="Migliore",
-                            aggfunc=lambda x: x.iloc[0])
-    mat = pivot.replace({"Vecchio": 0, "Nuovo": 1})
+    # ============================================================
+    # 🔶 3️⃣ WILCOXON + SIGNIFICATIVITÀ
+    # ============================================================
+    wilcox = []
+    for struct in results_filtered["Struttura"].unique():
+        for met in results_filtered["Metrica"].unique():
+            vals = results_filtered[(results_filtered["Struttura"]==struct)&(results_filtered["Metrica"]==met)]
+            if len(vals) < 2: continue
+            try:
+                stat,p = wilcoxon(vals["Valore Vecchio"], vals["Valore Nuovo"])
+            except:
+                stat,p = None,None
+            wilcox.append([struct,met,stat,p])
 
-    fig, ax = plt.subplots(figsize=(14, 4))
-    sns.heatmap(mat, annot=pivot, cmap="coolwarm", fmt="", ax=ax)
-    st.write(f"🔥 Heatmap {title}")
-    st.pyplot(fig)
-    return pivot
+    wilcox_df = pd.DataFrame(wilcox,columns=["Struttura","Metrica","Statistic","p-value"])
+    wilcox_df["Significativo"] = wilcox_df["p-value"] < 0.05
 
-ptv_pivot = make_heatmap("PTV", "PTV")
-oar_pivot = make_heatmap("OAR", "OAR")
+    show_only_sig = st.sidebar.checkbox("Mostra solo metriche significative (p < 0.05)")
+    if show_only_sig:
+        results_filtered = results_filtered.merge(
+            wilcox_df[wilcox_df["Significativo"]],on=["Struttura","Metrica"]
+        )
 
-# =========================================================
-# 📉 8) WILCOXON
-# =========================================================
-wilc = []
-for struct in results_df["Struttura"].unique():
-    for metric in results_df["Metrica"].unique():
-        vals = results_df[(results_df["Struttura"] == struct) &
-                          (results_df["Metrica"] == metric)]
-        if len(vals) < 2: continue
-        try:
-            w, p = wilcoxon(vals["Old"], vals["New"])
-        except:
-            w, p = None, None
+    st.subheader("📊 Risultati Wilcoxon")
+    st.dataframe(wilcox_df)
 
-        wilc.append([struct, metric, w, p])
+    # ============================================================
+    # 🔶 4️⃣ EXPORT EXCEL AVANZATO
+    # ============================================================
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        PTV_df.to_excel(writer,"PTV",index=False)
+        OAR_df.to_excel(writer,"OAR",index=False)
+        wilcox_df.to_excel(writer,"Wilcoxon",index=False)
 
-wilcox_df = pd.DataFrame(wilc, columns=["Struttura", "Metrica", "Statistic", "p-value"])
-st.subheader("📊 Wilcoxon Test")
-st.dataframe(wilcox_df)
+    st.download_button(
+        "📥 Scarica Excel completo",
+        data = output.getvalue(),
+        file_name="Analisi_RapidPlan_Advanced.xlsx"
+    )
 
-# =========================================================
-# 📥 9) EXPORT EXCEL
-# =========================================================
-output = BytesIO()
-with pd.ExcelWriter(output, engine="openpyxl") as wr:
-    results_df.to_excel(wr, sheet_name="Risultati", index=False)
-    if ptv_pivot is not None: ptv_pivot.to_excel(wr, sheet_name="PTV")
-    if oar_pivot is not None: oar_pivot.to_excel(wr, sheet_name="OAR")
-    wilcox_df.to_excel(wr, sheet_name="Wilcoxon", index=False)
+    # ============================================================
+    # RISULTATO FINALE
+    # ============================================================
+    st.subheader("🏁 RISULTATO FINALE")
 
-st.download_button("📥 Scarica Excel", output.getvalue(), "Analisi_RapidPlan.xlsx")
+    summary = results_filtered["Migliore"].value_counts()
+    st.write(summary)
 
-# =========================================================
-# 🏁 10) RISULTATO FINALE
-# =========================================================
-st.subheader("🏆 RISULTATO COMPLESSIVO")
-
-count = results_df["Migliore"].value_counts()
-st.write(count)
-
-if count.get("Nuovo", 0) > count.get("Vecchio", 0):
-    st.success("🎉 Il nuovo modello RapidPlan risulta migliore!")
-else:
-    st.error("⚠️ Il modello precedente risulta globalmente migliore.")
+    if summary.get("Nuovo",0) > summary.get("Vecchio",0):
+        st.success("🎉 Il nuovo modello RapidPlan risulta complessivamente migliore!")
+    else:
+        st.error("⚠️ Il modello vecchio sembra migliore su queste metriche.")
