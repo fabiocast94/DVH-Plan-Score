@@ -106,40 +106,30 @@ if uploaded_file:
     results_df = pd.DataFrame(results)
     results_df["Struttura_upper"] = results_df["Struttura"].str.upper()
 
-    # ============================================================
-    # Sidebar Filtri
-    # ============================================================
-    st.sidebar.header("🔍 Filtri")
+# ============================================================
+# Sidebar Filtri
+# ============================================================
+st.sidebar.header("🔍 Filtri")
 
-    structs_sel_upper = [s.upper() for s in st.sidebar.multiselect(
-        "Seleziona strutture",
-        results_df["Struttura"].unique(),
-        default=None
-    )]
+structs_sel_upper = [s.upper() for s in st.sidebar.multiselect(
+    "Seleziona strutture",
+    results_df["Struttura"].unique(),
+)]
 
-    metrics_sel = st.sidebar.multiselect(
-        "Seleziona metriche",
-        results_df["Metrica"].unique(),
-        default=None
-    )
+metrics_sel = st.sidebar.multiselect(
+    "Seleziona metriche",
+    results_df["Metrica"].unique(),
+)
 
-    results_filtered = results_df.copy()
-    if structs_sel_upper:
-        results_filtered = results_filtered[results_filtered["Struttura_upper"].isin(structs_sel_upper)]
-    if metrics_sel:
-        results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
+results_filtered = results_df.copy()
 
-    # ============================================================
-    # Separazione PTV vs OAR
-    # ============================================================
-    PTV_df = results_filtered[results_filtered["Struttura"].str.upper().str.contains("PTV")]
-    OAR_df = results_filtered[~results_filtered["Struttura"].str.upper().str.contains("PTV")]
+# Filtra strutture SOLO se ne è selezionata almeno 1
+if len(structs_sel_upper) > 0:
+    results_filtered = results_filtered[results_filtered["Struttura_upper"].isin(structs_sel_upper)]
 
-    st.subheader("📊 Risultati PTV")
-    st.dataframe(PTV_df)
-
-    st.subheader("🫁 Risultati OAR")
-    st.dataframe(OAR_df)
+# Filtra metriche SOLO se ne è selezionata almeno 1
+if len(metrics_sel) > 0:
+    results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
 
     # ============================================================
     # Test di Wilcoxon
