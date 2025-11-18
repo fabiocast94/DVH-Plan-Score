@@ -28,9 +28,9 @@ def better_value(old, new, metric):
         return "Nuovo" if new > old else "Vecchio"
 
 # ============================================================
-st.title("🔬 Analisi Dose Hunter – Multi-Struttura e Multi-Metrica")
+st.title("🔬 Analisi Multi-Struttura e Multi-Metrica")
 
-uploaded_file = st.file_uploader("Carica file Excel Dose Hunter", type=["xlsx"])
+uploaded_file = st.file_uploader("Carica file Excel", type=["xlsx"])
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
