@@ -32,7 +32,7 @@ def better_value(old, new, metric):
 # =============================
 # LOGO FISSO CENTRATO IN ALTO
 # =============================
-logo_path = Path("06_Humanitas.png")  # stesso nome del tuo file
+logo_path = Path("06_Humanitas.png")
 
 if logo_path.exists():
     encoded_logo = base64.b64encode(logo_path.read_bytes()).decode()
@@ -49,7 +49,6 @@ else:
     st.warning("⚠️ Logo 06_Humanitas non trovato nella cartella dello script.")
 
 # ============================================================
-
 st.title("🔬 Analisi Multi-Struttura e Multi-Metrica")
 
 uploaded_file = st.file_uploader("Carica file Excel", type=["xlsx"])
@@ -58,16 +57,14 @@ if uploaded_file:
     df = pd.read_excel(uploaded_file)
 
     # ============================================================
-    # IDENTIFICAZIONE STRUTTURE BASATA SUI PREFISSI DELLE COLONNE
+    # IDENTIFICAZIONE STRUTTURE
     # ============================================================
     structures = {}
     for col in df.columns:
         if "(" in col and ")" in col:
             struct = col.split("(")[0].strip()
             metric = col.split("(")[1].split(")")[0].strip()
-            if struct not in structures:
-                structures[struct] = {}
-            structures[struct][metric] = col
+            structures.setdefault(struct, {})[metric] = col
 
     st.write("Strutture trovate:", list(structures.keys()))
 
@@ -110,7 +107,7 @@ if uploaded_file:
     results_df["Struttura_upper"] = results_df["Struttura"].str.upper()
 
     # ============================================================
-    # Sidebar Filtri (SOLO SELEZIONE MANUALE)
+    # Sidebar Filtri
     # ============================================================
     st.sidebar.header("🔍 Filtri")
 
@@ -127,7 +124,6 @@ if uploaded_file:
     )
 
     results_filtered = results_df.copy()
-
     if structs_sel_upper:
         results_filtered = results_filtered[results_filtered["Struttura_upper"].isin(structs_sel_upper)]
     if metrics_sel:
@@ -170,6 +166,43 @@ if uploaded_file:
 
     st.subheader("📊 Risultati Wilcoxon")
     st.dataframe(wilcox_df)
+
+    # ============================================================
+    # Heatmap per struttura
+    # ============================================================
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+
+    st.subheader("🔥 Heatmap per ogni struttura")
+
+    for struct in results_filtered["Struttura"].unique():
+        df_struct = results_filtered[results_filtered["Struttura"] == struct]
+
+        if df_struct.empty:
+            continue
+
+        heatmap_data = df_struct.pivot_table(
+            index="ID",
+            columns="Metrica",
+            values="Δ %"
+        )
+
+        st.write(f"### 🔹 {struct}")
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+        sns.heatmap(
+            heatmap_data,
+            cmap="coolwarm",
+            center=0,
+            annot=True,
+            fmt=".1f",
+            linewidths=0.5,
+            cbar_kws={"label": "Δ % (Nuovo vs Vecchio)"}
+        )
+        plt.xticks(rotation=45, ha='right')
+        plt.title(f"Heatmap Δ% – {struct}")
+
+        st.pyplot(fig)
 
     # ============================================================
     # Download Excel
