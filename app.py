@@ -40,7 +40,7 @@ if logo_path.exists():
         f"""
         <div style="text-align: center; margin-bottom: 20px;">
             <img src="data:image/png;base64,{encoded_logo}" 
-                 style="width: 200px; height: auto;">
+                 style="width: 400px; height: auto;">
         </div>
         """,
         unsafe_allow_html=True
