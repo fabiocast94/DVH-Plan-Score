@@ -5,6 +5,8 @@ from scipy.stats import wilcoxon
 from io import BytesIO
 import base64
 from pathlib import Path
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 # ============================================================
 # 1) CRITERI METRICHE
@@ -14,14 +16,13 @@ METRIC_CRITERIA = {
     "D50": "lower", "Dmax": "lower", "Dmean": "lower",
     "V95": "higher","V90": "higher","V107": "lower",
     "V20": "lower","V5": "lower","V10": "lower",
-    "CI": "higher"
+    "CI": "higher","PI95":"higher","CI95":"higher","Mean":"lower","Max":"lower","Min":"lower"
 }
 EQUIV_THRESHOLD = 0.01  # soglia 1%
 
 def better_value(old, new, metric):
-    if pd.isna(old) or pd.isna(new): 
-        return "N/A"
-    crit = METRIC_CRITERIA.get(metric, "lower")
+    if pd.isna(old) or pd.isna(new): return "N/A"
+    crit = METRIC_CRITERIA.get(metric,"lower")
     rel_diff = abs(new - old) / old if old != 0 else 0
     if rel_diff < EQUIV_THRESHOLD:
         return "Equivalente"
@@ -30,12 +31,10 @@ def better_value(old, new, metric):
     else:
         return "Nuovo" if new > old else "Vecchio"
 
-
-# ============================================================
-# LOGO CENTRALE
-# ============================================================
+# =============================
+# LOGO FISSO CENTRATO IN ALTO
+# =============================
 logo_path = Path("06_Humanitas.png")
-
 if logo_path.exists():
     encoded_logo = base64.b64encode(logo_path.read_bytes()).decode()
     st.markdown(
@@ -48,22 +47,18 @@ if logo_path.exists():
         unsafe_allow_html=True
     )
 else:
-    st.warning("⚠️ Logo 06_Humanitas non trovato.")
+    st.warning("⚠️ Logo 06_Humanitas non trovato nella cartella dello script.")
 
-
-# ============================================================
-# CARICAMENTO FILE
 # ============================================================
 st.title("🔬 Analisi Multi-Struttura e Multi-Metrica")
 
 uploaded_file = st.file_uploader("Carica file Excel", type=["xlsx"])
 
 if uploaded_file:
-
     df = pd.read_excel(uploaded_file)
 
     # ============================================================
-    # IDENTIFICAZIONE STRUTTURE E METRICHE
+    # IDENTIFICAZIONE STRUTTURE
     # ============================================================
     structures = {}
     for col in df.columns:
@@ -74,17 +69,18 @@ if uploaded_file:
 
     st.write("Strutture trovate:", list(structures.keys()))
 
-    # Piano nuovo/vecchio
+    # ============================================================
+    # Tipo Piano Nuovo vs Vecchio
+    # ============================================================
     plan_cols = [c for c in df.columns if "plan" in c.lower()]
     col_plan = plan_cols[0] if plan_cols else "planID"
-
     id_cols = [c for c in df.columns if "id" in c.lower()]
     col_id = id_cols[0] if id_cols else "patientID"
 
     df["TipoPiano"] = df[col_plan].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
 
     # ============================================================
-    # CREAZIONE RISULTATI
+    # Creazione risultati
     # ============================================================
     results = []
     for id_val in df[col_id].unique():
@@ -92,12 +88,11 @@ if uploaded_file:
 
         for struct, metrics in structures.items():
             for met, col in metrics.items():
-
-                v_old = temp[temp["TipoPiano"] == "Vecchio"][col].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
-                v_new = temp[temp["TipoPiano"] == "Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
+                v_old = temp[temp["TipoPiano"]=="Vecchio"][col].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
+                v_new = temp[temp["TipoPiano"]=="Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
 
                 winner = better_value(v_old, v_new, met)
-                diff_pct = ((v_new - v_old) / v_old * 100 if (v_old not in [0, np.nan]) else np.nan)
+                diff_pct = ((v_new - v_old)/v_old*100 if v_old and not pd.isna(v_old) else 0)
 
                 results.append({
                     "ID": id_val,
@@ -113,30 +108,30 @@ if uploaded_file:
     results_df["Struttura_upper"] = results_df["Struttura"].str.upper()
 
     # ============================================================
-    # SIDEBAR FILTRI
+    # Sidebar Filtri
     # ============================================================
     st.sidebar.header("🔍 Filtri")
 
     structs_sel_upper = [s.upper() for s in st.sidebar.multiselect(
         "Seleziona strutture",
         results_df["Struttura"].unique(),
+        default=None
     )]
 
     metrics_sel = st.sidebar.multiselect(
         "Seleziona metriche",
         results_df["Metrica"].unique(),
+        default=None
     )
 
     results_filtered = results_df.copy()
-
-    if len(structs_sel_upper) > 0:
+    if structs_sel_upper:
         results_filtered = results_filtered[results_filtered["Struttura_upper"].isin(structs_sel_upper)]
-
-    if len(metrics_sel) > 0:
+    if metrics_sel:
         results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
 
     # ============================================================
-    # PTV vs OAR
+    # Separazione PTV vs OAR
     # ============================================================
     PTV_df = results_filtered[results_filtered["Struttura"].str.upper().str.contains("PTV")]
     OAR_df = results_filtered[~results_filtered["Struttura"].str.upper().str.contains("PTV")]
@@ -148,14 +143,13 @@ if uploaded_file:
     st.dataframe(OAR_df)
 
     # ============================================================
-    # WILCOXON
+    # Test di Wilcoxon
     # ============================================================
     wilcox = []
     for struct in results_filtered["Struttura"].unique():
         for met in results_filtered["Metrica"].unique():
             vals = results_filtered[(results_filtered["Struttura"]==struct)&(results_filtered["Metrica"]==met)]
-            if len(vals) < 2:
-                continue
+            if len(vals) < 2: continue
             try:
                 stat, p = wilcoxon(vals["Valore Vecchio"], vals["Valore Nuovo"])
             except:
@@ -165,29 +159,26 @@ if uploaded_file:
     wilcox_df = pd.DataFrame(wilcox, columns=["Struttura","Metrica","Statistic","p-value"])
     wilcox_df["Significativo"] = wilcox_df["p-value"] < 0.05
 
+    show_only_sig = st.sidebar.checkbox("Mostra solo metriche significative (p < 0.05)")
+    if show_only_sig:
+        results_filtered = results_filtered.merge(
+            wilcox_df[wilcox_df["Significativo"]], on=["Struttura","Metrica"]
+        )
+
     st.subheader("📊 Risultati Wilcoxon")
     st.dataframe(wilcox_df)
 
     # ============================================================
-    # 🔥 HEATMAP + DEBUG
+    # Heatmap per struttura con debug
     # ============================================================
-    st.subheader("🔥 DEBUG – HEATMAP")
-
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-
-    st.write("📌 DEBUG → results_filtered:")
-    st.write(results_filtered)
+    st.subheader("🔥 Heatmap per ogni struttura")
 
     for struct in results_filtered["Struttura"].unique():
-
-        st.write("------------------------------------------------")
-        st.write(f"📌 STRUTTURA: **{struct}**")
-
         df_struct = results_filtered[results_filtered["Struttura"] == struct]
 
-        st.write("📌 DEBUG → DataFrame filtrato per struttura:")
-        st.write(df_struct)
+        if df_struct.empty:
+            st.write(f"⚠️ Nessun dato per {struct}")
+            continue
 
         heatmap_data = df_struct.pivot_table(
             index="ID",
@@ -195,14 +186,16 @@ if uploaded_file:
             values="Δ %"
         )
 
-        st.write("📌 DEBUG → Pivot table (Δ %):")
-        st.write(heatmap_data)
+        # Debug pivot table
+        st.write(f"📌 Pivot table Δ% per {struct}")
+        st.dataframe(heatmap_data)
+        st.write("📌 Debug NaN nella pivot:", heatmap_data.isna().sum())
 
-        if heatmap_data.empty:
-            st.error(f"❌ Pivot vuoto → impossibile generare heatmap per {struct}")
-            continue
+        # Dimensioni dinamiche della figura
+        fig_width = max(6, len(heatmap_data.columns)*1.5)
+        fig_height = max(3, len(heatmap_data.index)*1.2)
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-        fig, ax = plt.subplots(figsize=(12, 6))
         sns.heatmap(
             heatmap_data,
             cmap="coolwarm",
@@ -213,11 +206,12 @@ if uploaded_file:
             cbar_kws={"label": "Δ % (Nuovo vs Vecchio)"}
         )
         plt.xticks(rotation=45, ha='right')
-
+        plt.title(f"Heatmap Δ% – {struct}")
+        plt.tight_layout()
         st.pyplot(fig)
 
     # ============================================================
-    # EXPORT EXCEL
+    # Download Excel
     # ============================================================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -227,12 +221,12 @@ if uploaded_file:
 
     st.download_button(
         "📥 Scarica Excel completo",
-        data=output.getvalue(),
+        data = output.getvalue(),
         file_name="Analisi_RapidPlan_Advanced.xlsx"
     )
 
     # ============================================================
-    # RISULTATO FINALE
+    # Risultato finale
     # ============================================================
     st.subheader("🏁 RISULTATO FINALE")
     summary = results_filtered["Migliore"].value_counts()
@@ -241,4 +235,4 @@ if uploaded_file:
     if summary.get("Nuovo",0) > summary.get("Vecchio",0):
         st.success("🎉 Il nuovo modello RapidPlan risulta complessivamente migliore!")
     else:
-        st.error("⚠️ Il modello vecchio sembra migliore.")  
+        st.error("⚠️ Il modello vecchio sembra migliore su queste metriche.")
