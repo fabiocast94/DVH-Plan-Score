@@ -16,7 +16,7 @@ METRIC_CRITERIA = {
     "V20": "lower","V5": "lower","V10": "lower",
     "CI": "higher"
 }
-EQUIV_THRESHOLD = 0.01  # soglia 1%
+EQUIV_THRESHOLD = 0.01
 
 def better_value(old, new, metric):
     if pd.isna(old) or pd.isna(new): return "N/A"
@@ -30,7 +30,7 @@ def better_value(old, new, metric):
         return "Nuovo" if new > old else "Vecchio"
 
 # =============================
-# LOGO FISSO CENTRATO IN ALTO
+# LOGO
 # =============================
 logo_path = Path("06_Humanitas.png")
 
@@ -39,14 +39,13 @@ if logo_path.exists():
     st.markdown(
         f"""
         <div style="text-align: center; margin-bottom: 20px;">
-            <img src="data:image/png;base64,{encoded_logo}" 
-                 style="width: 400px; height: auto;">
+            <img src="data:image/png;base64,{encoded_logo}" style="width: 400px; height: auto;">
         </div>
         """,
         unsafe_allow_html=True
     )
 else:
-    st.warning("⚠️ Logo 06_Humanitas non trovato nella cartella dello script.")
+    st.warning("⚠️ Logo non trovato.")
 
 # ============================================================
 st.title("🔬 Analisi Multi-Struttura e Multi-Metrica")
@@ -91,7 +90,7 @@ if uploaded_file:
                 v_new = temp[temp["TipoPiano"]=="Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
 
                 winner = better_value(v_old, v_new, met)
-                diff_pct = ((v_new - v_old)/v_old*100 if v_old and not pd.isna(v_old) else 0)
+                diff_pct = ((v_new - v_old)/v_old*100 if v_old and not pd.isna(v_old) else np.nan)
 
                 results.append({
                     "ID": id_val,
@@ -106,33 +105,42 @@ if uploaded_file:
     results_df = pd.DataFrame(results)
     results_df["Struttura_upper"] = results_df["Struttura"].str.upper()
 
-# ============================================================
-# Sidebar Filtri
-# ============================================================
-st.sidebar.header("🔍 Filtri")
+    # ============================================================
+    # Sidebar Filtri
+    # ============================================================
+    st.sidebar.header("🔍 Filtri")
 
-structs_sel_upper = [s.upper() for s in st.sidebar.multiselect(
-    "Seleziona strutture",
-    results_df["Struttura"].unique(),
-)]
+    structs_sel_upper = [s.upper() for s in st.sidebar.multiselect(
+        "Seleziona strutture",
+        results_df["Struttura"].unique()
+    )]
 
-metrics_sel = st.sidebar.multiselect(
-    "Seleziona metriche",
-    results_df["Metrica"].unique(),
-)
+    metrics_sel = st.sidebar.multiselect(
+        "Seleziona metriche",
+        results_df["Metrica"].unique()
+    )
 
-results_filtered = results_df.copy()
+    results_filtered = results_df.copy()
 
-# Filtra strutture SOLO se ne è selezionata almeno 1
-if len(structs_sel_upper) > 0:
-    results_filtered = results_filtered[results_filtered["Struttura_upper"].isin(structs_sel_upper)]
-
-# Filtra metriche SOLO se ne è selezionata almeno 1
-if len(metrics_sel) > 0:
-    results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
+    if len(structs_sel_upper) > 0:
+        results_filtered = results_filtered[results_filtered["Struttura_upper"].isin(structs_sel_upper)]
+    if len(metrics_sel) > 0:
+        results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
 
     # ============================================================
-    # Test di Wilcoxon
+    # Separazione PTV vs OAR
+    # ============================================================
+    PTV_df = results_filtered[results_filtered["Struttura"].str.upper().str.contains("PTV")]
+    OAR_df = results_filtered[~results_filtered["Struttura"].str.upper().str.contains("PTV")]
+
+    st.subheader("📊 Risultati PTV")
+    st.dataframe(PTV_df)
+
+    st.subheader("🫁 Risultati OAR")
+    st.dataframe(OAR_df)
+
+    # ============================================================
+    # Test Wilcoxon
     # ============================================================
     wilcox = []
     for struct in results_filtered["Struttura"].unique():
@@ -148,27 +156,26 @@ if len(metrics_sel) > 0:
     wilcox_df = pd.DataFrame(wilcox, columns=["Struttura","Metrica","Statistic","p-value"])
     wilcox_df["Significativo"] = wilcox_df["p-value"] < 0.05
 
-    show_only_sig = st.sidebar.checkbox("Mostra solo metriche significative (p < 0.05)")
-    if show_only_sig:
-        results_filtered = results_filtered.merge(
-            wilcox_df[wilcox_df["Significativo"]], on=["Struttura","Metrica"]
-        )
-
     st.subheader("📊 Risultati Wilcoxon")
     st.dataframe(wilcox_df)
 
     # ============================================================
-    # Heatmap per struttura
+    # Heatmap con Debug
     # ============================================================
     import seaborn as sns
     import matplotlib.pyplot as plt
 
-    st.subheader("🔥 Heatmap per ogni struttura")
+    st.subheader("🔥 Heatmap per ogni struttura (DEBUG ATTIVO)")
 
     for struct in results_filtered["Struttura"].unique():
         df_struct = results_filtered[results_filtered["Struttura"] == struct]
 
+        st.write(f"---")
+        st.write(f"📌 DEBUG → Struttura: **{struct}**")
+        st.write(df_struct)
+
         if df_struct.empty:
+            st.error(f"Struttura {struct}: dataframe vuoto → impossibile creare heatmap.")
             continue
 
         heatmap_data = df_struct.pivot_table(
@@ -177,7 +184,12 @@ if len(metrics_sel) > 0:
             values="Δ %"
         )
 
-        st.write(f"### 🔹 {struct}")
+        st.write("📌 DEBUG → Pivot Matrix:")
+        st.write(heatmap_data)
+
+        if heatmap_data.empty:
+            st.error(f"❌ Pivot vuoto → nessuna heatmap per {struct}")
+            continue
 
         fig, ax = plt.subplots(figsize=(12, 6))
         sns.heatmap(
