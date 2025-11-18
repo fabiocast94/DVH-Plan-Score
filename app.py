@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 from scipy.stats import wilcoxon
 from io import BytesIO
+import base64
+from pathlib import Path
 
 # ============================================================
 # 1) CRITERI METRICHE
@@ -27,7 +29,27 @@ def better_value(old, new, metric):
     else:
         return "Nuovo" if new > old else "Vecchio"
 
+# =============================
+# LOGO FISSO CENTRATO IN ALTO
+# =============================
+logo_path = Path("06_Humanitas.png")  # stesso nome del tuo file
+
+if logo_path.exists():
+    encoded_logo = base64.b64encode(logo_path.read_bytes()).decode()
+    st.markdown(
+        f"""
+        <div style="text-align: center; margin-bottom: 20px;">
+            <img src="data:image/png;base64,{encoded_logo}" 
+                 style="width: 200px; height: auto;">
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+    st.warning("⚠️ Logo 06_Humanitas non trovato nella cartella dello script.")
+
 # ============================================================
+
 st.title("🔬 Analisi Multi-Struttura e Multi-Metrica")
 
 uploaded_file = st.file_uploader("Carica file Excel", type=["xlsx"])
