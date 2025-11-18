@@ -41,7 +41,7 @@ if uploaded_file:
     structures = {}
     for col in df.columns:
         if "(" in col and ")" in col:
-            struct = col.split("(")[0].strip()  # tutto prima della parentesi
+            struct = col.split("(")[0].strip()
             metric = col.split("(")[1].split(")")[0].strip()
             if struct not in structures:
                 structures[struct] = {}
@@ -85,31 +85,27 @@ if uploaded_file:
                 })
 
     results_df = pd.DataFrame(results)
-    results_df["Struttura_upper"] = results_df["Struttura"].str.upper()  # per confronto con preset
+    results_df["Struttura_upper"] = results_df["Struttura"].str.upper()
 
     # ============================================================
-    # Sidebar Filtri
+    # Sidebar Filtri (SOLO SELEZIONE MANUALE)
     # ============================================================
-    PRESETS = {
-        "Thorax": ["PTV", "Heart", "Lung"],
-        "Head and Neck": ["PTV", "SpinalCord", "ParotidL", "ParotidR"],
-        "Breast": ["PTV", "Heart", "Lung", "ContralateralBreast"],
-        "Abdomen": ["PTV", "Liver", "KidneyL", "KidneyR", "Bowel"],
-        "Prostate": ["PTV", "Bladder", "Rectum", "FemoralL", "FemoralR"],
-        "Pelvi": ["PTV", "Bladder", "Rectum", "FemoralL", "FemoralR"]
-    }
-    PRESETS_UPPER = {k: [s.upper() for s in v] for k,v in PRESETS.items()}
-
     st.sidebar.header("🔍 Filtri")
-    preset_choice = st.sidebar.selectbox("Scegli preset distretto", ["Custom"] + list(PRESETS.keys()))
-    if preset_choice != "Custom":
-        structs_sel_upper = PRESETS_UPPER[preset_choice]
-    else:
-        structs_sel_upper = [s.upper() for s in st.sidebar.multiselect("Seleziona strutture", results_df["Struttura"].unique(), default=None)]
 
-    metrics_sel = st.sidebar.multiselect("Seleziona metriche", results_df["Metrica"].unique(), default=None)
+    structs_sel_upper = [s.upper() for s in st.sidebar.multiselect(
+        "Seleziona strutture",
+        results_df["Struttura"].unique(),
+        default=None
+    )]
+
+    metrics_sel = st.sidebar.multiselect(
+        "Seleziona metriche",
+        results_df["Metrica"].unique(),
+        default=None
+    )
 
     results_filtered = results_df.copy()
+
     if structs_sel_upper:
         results_filtered = results_filtered[results_filtered["Struttura_upper"].isin(structs_sel_upper)]
     if metrics_sel:
@@ -128,7 +124,7 @@ if uploaded_file:
     st.dataframe(OAR_df)
 
     # ============================================================
-    # Wilcoxon
+    # Test di Wilcoxon
     # ============================================================
     wilcox = []
     for struct in results_filtered["Struttura"].unique():
@@ -136,25 +132,25 @@ if uploaded_file:
             vals = results_filtered[(results_filtered["Struttura"]==struct)&(results_filtered["Metrica"]==met)]
             if len(vals) < 2: continue
             try:
-                stat,p = wilcoxon(vals["Valore Vecchio"], vals["Valore Nuovo"])
+                stat, p = wilcoxon(vals["Valore Vecchio"], vals["Valore Nuovo"])
             except:
-                stat,p = None,None
-            wilcox.append([struct,met,stat,p])
+                stat, p = None, None
+            wilcox.append([struct, met, stat, p])
 
-    wilcox_df = pd.DataFrame(wilcox,columns=["Struttura","Metrica","Statistic","p-value"])
+    wilcox_df = pd.DataFrame(wilcox, columns=["Struttura","Metrica","Statistic","p-value"])
     wilcox_df["Significativo"] = wilcox_df["p-value"] < 0.05
 
     show_only_sig = st.sidebar.checkbox("Mostra solo metriche significative (p < 0.05)")
     if show_only_sig:
         results_filtered = results_filtered.merge(
-            wilcox_df[wilcox_df["Significativo"]],on=["Struttura","Metrica"]
+            wilcox_df[wilcox_df["Significativo"]], on=["Struttura","Metrica"]
         )
 
     st.subheader("📊 Risultati Wilcoxon")
     st.dataframe(wilcox_df)
 
     # ============================================================
-    # Export Excel
+    # Download Excel
     # ============================================================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
