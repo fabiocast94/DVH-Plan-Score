@@ -8,15 +8,18 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import streamlit as st
 import os
+import glob
 
-# DEFINIZIONE del percorso DoseHunter
-DOSEHUNTER_FILE = r"C:\Users\fabio\Desktop\Test Dose Hunter\data.csv"
+folder_path = r"C:\Users\fabio\Desktop\Test Dose Hunter"
+csv_files = glob.glob(f"{folder_path}/*.csv")
 
-# Controllo se il file esiste
-st.write("Percorso DoseHunter:")
-st.write(DOSEHUNTER_FILE)
-st.write("File esiste?", os.path.exists(DOSEHUNTER_FILE))
-
+if csv_files:
+    # prende l’ultimo CSV generato
+    latest_file = max(csv_files, key=os.path.getctime)
+    df = pd.read_csv(latest_file)
+    st.success(f"Caricato automaticamente il file: {latest_file}")
+else:
+    st.warning("Nessun CSV trovato nella cartella DoseHunter")
 
 # ============================================================
 # CONFIG: Percorso DoseHunter
