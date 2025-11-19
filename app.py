@@ -9,6 +9,10 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import os
 
+st.write("Controllo percorso DoseHunter:")
+st.write(DOSEHUNTER_FILE)
+st.write("File esiste?", os.path.exists(DOSEHUNTER_FILE))
+
 # ============================================================
 # CONFIG: Percorso DoseHunter
 # ============================================================
