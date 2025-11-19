@@ -12,7 +12,7 @@ import os
 # ============================================================
 # CONFIG: Percorso DoseHunter
 # ============================================================
-DOSEHUNTER_FILE = r"C:\Users\fabio\Desktop\Test Dose Hunter\data.csv"
+DOSEHUNTER_FILE = "C:\\Users\\fabio\\Desktop\\Test Dose Hunter\\data.csv"
 
 # ============================================================
 # Funzione: Caricamento CSV con autodetection
