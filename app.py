@@ -1,3 +1,4 @@
+import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.stats import wilcoxon
@@ -6,50 +7,6 @@ import base64
 from pathlib import Path
 import seaborn as sns
 import matplotlib.pyplot as plt
-import streamlit as st
-import os
-import glob
-
-folder_path = r"C:\Users\fabio\Desktop\Test Dose Hunter"
-csv_files = glob.glob(f"{folder_path}/*.csv")
-
-if csv_files:
-    # prende l’ultimo CSV generato
-    latest_file = max(csv_files, key=os.path.getctime)
-    df = pd.read_csv(latest_file)
-    st.success(f"Caricato automaticamente il file: {latest_file}")
-else:
-    st.warning("Nessun CSV trovato nella cartella DoseHunter")
-
-# ============================================================
-# CONFIG: Percorso DoseHunter
-# ============================================================
-DOSEHUNTER_FILE = "C:\\Users\\fabio\\Desktop\\Test Dose Hunter\\data.csv"
-
-# ============================================================
-# Funzione: Caricamento CSV con autodetection
-# ============================================================
-def load_csv_smart(file_path):
-    """Carica CSV con autodetection separatore/encoding."""
-    try:
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            sample = f.read(2048)
-    except Exception as e:
-        st.error(f"Impossibile leggere il file: {e}")
-        return None
-
-    # autodetect separatore
-    if ";" in sample and sample.count(";") > sample.count(","):
-        sep = ";"
-    elif "\t" in sample:
-        sep = "\t"
-    else:
-        sep = ","
-
-    try:
-        return pd.read_csv(file_path, sep=sep, encoding="utf-8")
-    except:
-        return pd.read_csv(file_path, sep=sep, encoding="ISO-8859-1")
 
 # ============================================================
 # 1) CRITERI METRICHE
@@ -95,93 +52,103 @@ else:
     st.warning("⚠️ Logo 06_Humanitas non trovato nella cartella dello script.")
 
 # ============================================================
-# STREAMLIT - Titolo
-# ============================================================
 st.title("🔬 Analisi Multi-Struttura e Multi-Metrica")
 
-df = None  # dataframe iniziale
-
-# ============================================================
-# 🔘 IMPORT AUTOMATICO DA DOSEHUNTER
-# ============================================================
-st.subheader("📥 Importazione Automatica da DoseHunter")
-
-if st.button("Importa dati da DoseHunter"):
-    if os.path.exists(DOSEHUNTER_FILE):
-        st.success(f"Trovato file: {DOSEHUNTER_FILE}")
-        df = load_csv_smart(DOSEHUNTER_FILE)
-    else:
-        st.error(f"❌ File non trovato: {DOSEHUNTER_FILE}")
-
-# ============================================================
-# 🔘 OPPURE CARICAMENTO MANUALE
-# ============================================================
+# ACCETTA SIA EXCEL SIA CSV
 uploaded_file = st.file_uploader("Carica file Excel o CSV", type=["xlsx", "csv"])
 
-if df is None and uploaded_file:
-    if uploaded_file.name.lower().endswith(".csv"):
-        df = load_csv_smart(uploaded_file)
-    else:
-        df = pd.read_excel(uploaded_file)
+def load_any_file(file):
+    """Carica CSV con autodetection separatore/encoding o Excel."""
+    name = file.name.lower()
 
-# ============================================================
-# SE NESSUN FILE È STATO CARICATO → STOP
-# ============================================================
-if df is None:
-    st.info("Carica un file oppure usa il pulsante 'Importa dati da DoseHunter'")
-    st.stop()
+    if name.endswith(".csv"):
+        try:
+            # autodetect separatore
+            sample = file.read(2048).decode("utf-8", errors="ignore")
+            file.seek(0)
 
-# ============================================================
-# INIZIO ANALISI (tutto il tuo codice originale da qui in avanti)
-# ============================================================
+            if ";" in sample and sample.count(";") > sample.count(","):
+                sep = ";"
+            elif "\t" in sample:
+                sep = "\t"
+            else:
+                sep = ","
 
-df.columns = df.columns.str.strip()
+            try:
+                return pd.read_csv(file, sep=sep, encoding="utf-8")
+            except:
+                file.seek(0)
+                return pd.read_csv(file, sep=sep, encoding="ISO-8859-1")
 
-# IDENTIFICAZIONE STRUTTURE
-structures = {}
-for col in df.columns:
-    if "(" in col and ")" in col:
-        struct = col.split("(")[0].strip()
-        metric = col.split("(")[1].split(")")[0].strip()
-        structures.setdefault(struct, {})[metric] = col
+        except Exception as e:
+            st.error(f"Errore nel caricamento del CSV: {e}")
+            return None
 
-st.write("Strutture trovate:", list(structures.keys()))
+    # caso Excel
+    return pd.read_excel(file)
 
-# Tipo Piano Nuovo vs Vecchio
-plan_cols = [c for c in df.columns if "plan" in c.lower()]
-col_plan = plan_cols[0] if plan_cols else "planID"
+# ======== LETTURA ============
+if uploaded_file:
+    df = load_any_file(uploaded_file)
 
-id_cols = [c for c in df.columns if "id" in c.lower()]
-col_id = id_cols[0] if id_cols else "patientID"
+    if df is None:
+        st.stop()
 
-df["TipoPiano"] = df[col_plan].apply(
-    lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio"
-)
+    # ripulisce colonne
+    df.columns = df.columns.str.strip()
 
-# ============================================================
-# Creazione risultati
-# ============================================================
-results = []
-for id_val in df[col_id].unique():
-    temp = df[df[col_id] == id_val]
+    # ============================================================
+    # IDENTIFICAZIONE STRUTTURE
+    # ============================================================
+    structures = {}
+    for col in df.columns:
+        if "(" in col and ")" in col:
+            struct = col.split("(")[0].strip()
+            metric = col.split("(")[1].split(")")[0].strip()
+            structures.setdefault(struct, {})[metric] = col
 
-    for struct, metrics in structures.items():
-        for met, col in metrics.items():
-            v_old = temp[temp["TipoPiano"]=="Vecchio"][col].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
-            v_new = temp[temp["TipoPiano"]=="Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
+    st.write("Strutture trovate:", list(structures.keys()))
 
-            winner = better_value(v_old, v_new, met)
-            diff_pct = ((v_new - v_old)/v_old*100 if v_old and not pd.isna(v_old) else 0)
+    # ============================================================
+    # Tipo Piano Nuovo vs Vecchio
+    # ============================================================
+    plan_cols = [c for c in df.columns if "plan" in c.lower()]
+    col_plan = plan_cols[0] if plan_cols else "planID"
 
-            results.append({
-                "ID": id_val,
-                "Struttura": struct,
-                "Metrica": met,
-                "Valore Vecchio": v_old,
-                "Valore Nuovo": v_new,
-                "Δ %": diff_pct,
-                "Migliore": winner
-            })
+    id_cols = [c for c in df.columns if "id" in c.lower()]
+    col_id = id_cols[0] if id_cols else "patientID"
+
+    df["TipoPiano"] = df[col_plan].apply(
+        lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio"
+    )
+
+    # ============================================================
+    # Creazione risultati
+    # ============================================================
+    results = []
+    for id_val in df[col_id].unique():
+        temp = df[df[col_id] == id_val]
+
+        for struct, metrics in structures.items():
+            for met, col in metrics.items():
+                v_old = temp[temp["TipoPiano"]=="Vecchio"][col].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
+                v_new = temp[temp["TipoPiano"]=="Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
+
+                winner = better_value(v_old, v_new, met)
+                diff_pct = ((v_new - v_old)/v_old*100 if v_old and not pd.isna(v_old) else 0)
+
+                results.append({
+                    "ID": id_val,
+                    "Struttura": struct,
+                    "Metrica": met,
+                    "Valore Vecchio": v_old,
+                    "Valore Nuovo": v_new,
+                    "Δ %": diff_pct,
+                    "Migliore": winner
+                })
+
+    results_df = pd.DataFrame(results)
+    results_df["Struttura_upper"] = results_df["Struttura"].str.upper()
 
     # ============================================================
     # Sidebar Filtri
@@ -293,6 +260,8 @@ for id_val in df[col_id].unique():
         data = output.getvalue(),
         file_name="Analisi_RapidPlan_Advanced.xlsx"
     )
+
+    # ============================================================
     # Risultato finale
     # ============================================================
     st.subheader("🏁 RISULTATO FINALE")
