@@ -7,6 +7,37 @@ import base64
 from pathlib import Path
 import seaborn as sns
 import matplotlib.pyplot as plt
+import os
+
+# ============================================================
+# CONFIG: Percorso DoseHunter
+# ============================================================
+DOSEHUNTER_FILE = r"C:\Users\fabio\Desktop\Test Dose Hunter\data.csv"
+
+# ============================================================
+# Funzione: Caricamento CSV con autodetection
+# ============================================================
+def load_csv_smart(file_path):
+    """Carica CSV con autodetection separatore/encoding."""
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            sample = f.read(2048)
+    except Exception as e:
+        st.error(f"Impossibile leggere il file: {e}")
+        return None
+
+    # autodetect separatore
+    if ";" in sample and sample.count(";") > sample.count(","):
+        sep = ";"
+    elif "\t" in sample:
+        sep = "\t"
+    else:
+        sep = ","
+
+    try:
+        return pd.read_csv(file_path, sep=sep, encoding="utf-8")
+    except:
+        return pd.read_csv(file_path, sep=sep, encoding="ISO-8859-1")
 
 # ============================================================
 # 1) CRITERI METRICHE
@@ -52,75 +83,68 @@ else:
     st.warning("⚠️ Logo 06_Humanitas non trovato nella cartella dello script.")
 
 # ============================================================
+# STREAMLIT - Titolo
+# ============================================================
 st.title("🔬 Analisi Multi-Struttura e Multi-Metrica")
 
-# ACCETTA SIA EXCEL SIA CSV
+df = None  # dataframe iniziale
+
+# ============================================================
+# 🔘 IMPORT AUTOMATICO DA DOSEHUNTER
+# ============================================================
+st.subheader("📥 Importazione Automatica da DoseHunter")
+
+if st.button("Importa dati da DoseHunter"):
+    if os.path.exists(DOSEHUNTER_FILE):
+        st.success(f"Trovato file: {DOSEHUNTER_FILE}")
+        df = load_csv_smart(DOSEHUNTER_FILE)
+    else:
+        st.error(f"❌ File non trovato: {DOSEHUNTER_FILE}")
+
+# ============================================================
+# 🔘 OPPURE CARICAMENTO MANUALE
+# ============================================================
 uploaded_file = st.file_uploader("Carica file Excel o CSV", type=["xlsx", "csv"])
 
-def load_any_file(file):
-    """Carica CSV con autodetection separatore/encoding o Excel."""
-    name = file.name.lower()
+if df is None and uploaded_file:
+    if uploaded_file.name.lower().endswith(".csv"):
+        df = load_csv_smart(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
 
-    if name.endswith(".csv"):
-        try:
-            # autodetect separatore
-            sample = file.read(2048).decode("utf-8", errors="ignore")
-            file.seek(0)
+# ============================================================
+# SE NESSUN FILE È STATO CARICATO → STOP
+# ============================================================
+if df is None:
+    st.info("Carica un file oppure usa il pulsante 'Importa dati da DoseHunter'")
+    st.stop()
 
-            if ";" in sample and sample.count(";") > sample.count(","):
-                sep = ";"
-            elif "\t" in sample:
-                sep = "\t"
-            else:
-                sep = ","
+# ============================================================
+# INIZIO ANALISI (tutto il tuo codice originale da qui in avanti)
+# ============================================================
 
-            try:
-                return pd.read_csv(file, sep=sep, encoding="utf-8")
-            except:
-                file.seek(0)
-                return pd.read_csv(file, sep=sep, encoding="ISO-8859-1")
+df.columns = df.columns.str.strip()
 
-        except Exception as e:
-            st.error(f"Errore nel caricamento del CSV: {e}")
-            return None
+# IDENTIFICAZIONE STRUTTURE
+structures = {}
+for col in df.columns:
+    if "(" in col and ")" in col:
+        struct = col.split("(")[0].strip()
+        metric = col.split("(")[1].split(")")[0].strip()
+        structures.setdefault(struct, {})[metric] = col
 
-    # caso Excel
-    return pd.read_excel(file)
+st.write("Strutture trovate:", list(structures.keys()))
 
-# ======== LETTURA ============
-if uploaded_file:
-    df = load_any_file(uploaded_file)
+# Tipo Piano Nuovo vs Vecchio
+plan_cols = [c for c in df.columns if "plan" in c.lower()]
+col_plan = plan_cols[0] if plan_cols else "planID"
 
-    if df is None:
-        st.stop()
+id_cols = [c for c in df.columns if "id" in c.lower()]
+col_id = id_cols[0] if id_cols else "patientID"
 
-    # ripulisce colonne
-    df.columns = df.columns.str.strip()
-
-    # ============================================================
-    # IDENTIFICAZIONE STRUTTURE
-    # ============================================================
-    structures = {}
-    for col in df.columns:
-        if "(" in col and ")" in col:
-            struct = col.split("(")[0].strip()
-            metric = col.split("(")[1].split(")")[0].strip()
-            structures.setdefault(struct, {})[metric] = col
-
-    st.write("Strutture trovate:", list(structures.keys()))
-
-    # ============================================================
-    # Tipo Piano Nuovo vs Vecchio
-    # ============================================================
-    plan_cols = [c for c in df.columns if "plan" in c.lower()]
-    col_plan = plan_cols[0] if plan_cols else "planID"
-
-    id_cols = [c for c in df.columns if "id" in c.lower()]
-    col_id = id_cols[0] if id_cols else "patientID"
-
-    df["TipoPiano"] = df[col_plan].apply(
-        lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio"
-    )
+df["TipoPiano"] = df[col_plan].apply(
+    lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio"
+)
 
     # ============================================================
     # Creazione risultati
