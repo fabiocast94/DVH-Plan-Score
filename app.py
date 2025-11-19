@@ -284,8 +284,6 @@ df["TipoPiano"] = df[col_plan].apply(
         data = output.getvalue(),
         file_name="Analisi_RapidPlan_Advanced.xlsx"
     )
-
-    # ============================================================
     # Risultato finale
     # ============================================================
     st.subheader("🏁 RISULTATO FINALE")
