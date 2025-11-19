@@ -16,12 +16,14 @@ METRIC_CRITERIA = {
     "D50": "lower", "Dmax": "lower", "Dmean": "lower",
     "V95": "higher","V90": "higher","V107": "lower",
     "V20": "lower","V5": "lower","V10": "lower",
-    "CI": "higher","PI95":"higher","CI95":"higher","Mean":"lower","Max":"lower","Min":"lower"
+    "CI": "higher","PI95":"higher","CI95":"higher",
+    "Mean":"lower","Max":"lower","Min":"lower"
 }
 EQUIV_THRESHOLD = 0.01  # soglia 1%
 
 def better_value(old, new, metric):
-    if pd.isna(old) or pd.isna(new): return "N/A"
+    if pd.isna(old) or pd.isna(new): 
+        return "N/A"
     crit = METRIC_CRITERIA.get(metric,"lower")
     rel_diff = abs(new - old) / old if old != 0 else 0
     if rel_diff < EQUIV_THRESHOLD:
@@ -52,10 +54,48 @@ else:
 # ============================================================
 st.title("🔬 Analisi Multi-Struttura e Multi-Metrica")
 
-uploaded_file = st.file_uploader("Carica file Excel", type=["xlsx"])
+# ACCETTA SIA EXCEL SIA CSV
+uploaded_file = st.file_uploader("Carica file Excel o CSV", type=["xlsx", "csv"])
 
+def load_any_file(file):
+    """Carica CSV con autodetection separatore/encoding o Excel."""
+    name = file.name.lower()
+
+    if name.endswith(".csv"):
+        try:
+            # autodetect separatore
+            sample = file.read(2048).decode("utf-8", errors="ignore")
+            file.seek(0)
+
+            if ";" in sample and sample.count(";") > sample.count(","):
+                sep = ";"
+            elif "\t" in sample:
+                sep = "\t"
+            else:
+                sep = ","
+
+            try:
+                return pd.read_csv(file, sep=sep, encoding="utf-8")
+            except:
+                file.seek(0)
+                return pd.read_csv(file, sep=sep, encoding="ISO-8859-1")
+
+        except Exception as e:
+            st.error(f"Errore nel caricamento del CSV: {e}")
+            return None
+
+    # caso Excel
+    return pd.read_excel(file)
+
+# ======== LETTURA ============
 if uploaded_file:
-    df = pd.read_excel(uploaded_file)
+    df = load_any_file(uploaded_file)
+
+    if df is None:
+        st.stop()
+
+    # ripulisce colonne
+    df.columns = df.columns.str.strip()
 
     # ============================================================
     # IDENTIFICAZIONE STRUTTURE
@@ -74,10 +114,13 @@ if uploaded_file:
     # ============================================================
     plan_cols = [c for c in df.columns if "plan" in c.lower()]
     col_plan = plan_cols[0] if plan_cols else "planID"
+
     id_cols = [c for c in df.columns if "id" in c.lower()]
     col_id = id_cols[0] if id_cols else "patientID"
 
-    df["TipoPiano"] = df[col_plan].apply(lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio")
+    df["TipoPiano"] = df[col_plan].apply(
+        lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio"
+    )
 
     # ============================================================
     # Creazione risultati
@@ -169,7 +212,7 @@ if uploaded_file:
     st.dataframe(wilcox_df)
 
     # ============================================================
-    # Heatmap per struttura con debug
+    # Heatmap per struttura
     # ============================================================
     st.subheader("🔥 Heatmap per ogni struttura")
 
@@ -177,7 +220,6 @@ if uploaded_file:
         df_struct = results_filtered[results_filtered["Struttura"] == struct]
 
         if df_struct.empty:
-            st.write(f"⚠️ Nessun dato per {struct}")
             continue
 
         heatmap_data = df_struct.pivot_table(
@@ -186,12 +228,6 @@ if uploaded_file:
             values="Δ %"
         )
 
-        # Debug pivot table
-        st.write(f"📌 Pivot table Δ% per {struct}")
-        st.dataframe(heatmap_data)
-        st.write("📌 Debug NaN nella pivot:", heatmap_data.isna().sum())
-
-        # Dimensioni dinamiche della figura
         fig_width = max(6, len(heatmap_data.columns)*1.5)
         fig_height = max(3, len(heatmap_data.index)*1.2)
         fig, ax = plt.subplots(figsize=(fig_width, fig_height))
