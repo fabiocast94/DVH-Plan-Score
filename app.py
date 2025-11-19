@@ -146,33 +146,30 @@ df["TipoPiano"] = df[col_plan].apply(
     lambda x: "Nuovo" if "new" in str(x).lower() else "Vecchio"
 )
 
-    # ============================================================
-    # Creazione risultati
-    # ============================================================
-    results = []
-    for id_val in df[col_id].unique():
-        temp = df[df[col_id] == id_val]
+# ============================================================
+# Creazione risultati
+# ============================================================
+results = []
+for id_val in df[col_id].unique():
+    temp = df[df[col_id] == id_val]
 
-        for struct, metrics in structures.items():
-            for met, col in metrics.items():
-                v_old = temp[temp["TipoPiano"]=="Vecchio"][col].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
-                v_new = temp[temp["TipoPiano"]=="Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
+    for struct, metrics in structures.items():
+        for met, col in metrics.items():
+            v_old = temp[temp["TipoPiano"]=="Vecchio"][col].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
+            v_new = temp[temp["TipoPiano"]=="Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
 
-                winner = better_value(v_old, v_new, met)
-                diff_pct = ((v_new - v_old)/v_old*100 if v_old and not pd.isna(v_old) else 0)
+            winner = better_value(v_old, v_new, met)
+            diff_pct = ((v_new - v_old)/v_old*100 if v_old and not pd.isna(v_old) else 0)
 
-                results.append({
-                    "ID": id_val,
-                    "Struttura": struct,
-                    "Metrica": met,
-                    "Valore Vecchio": v_old,
-                    "Valore Nuovo": v_new,
-                    "Δ %": diff_pct,
-                    "Migliore": winner
-                })
-
-    results_df = pd.DataFrame(results)
-    results_df["Struttura_upper"] = results_df["Struttura"].str.upper()
+            results.append({
+                "ID": id_val,
+                "Struttura": struct,
+                "Metrica": met,
+                "Valore Vecchio": v_old,
+                "Valore Nuovo": v_new,
+                "Δ %": diff_pct,
+                "Migliore": winner
+            })
 
     # ============================================================
     # Sidebar Filtri
