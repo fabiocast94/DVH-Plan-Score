@@ -1,4 +1,3 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.stats import wilcoxon
@@ -7,11 +6,17 @@ import base64
 from pathlib import Path
 import seaborn as sns
 import matplotlib.pyplot as plt
+import streamlit as st
 import os
 
-st.write("Controllo percorso DoseHunter:")
+# DEFINIZIONE del percorso DoseHunter
+DOSEHUNTER_FILE = r"C:\Users\fabio\Desktop\Test Dose Hunter\data.csv"
+
+# Controllo se il file esiste
+st.write("Percorso DoseHunter:")
 st.write(DOSEHUNTER_FILE)
 st.write("File esiste?", os.path.exists(DOSEHUNTER_FILE))
+
 
 # ============================================================
 # CONFIG: Percorso DoseHunter
