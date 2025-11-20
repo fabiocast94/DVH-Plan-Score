@@ -274,29 +274,24 @@ if uploaded_file:
         plt.xticks(rotation=45, ha='right')
         plt.title(f"Heatmap Δ% – {struct}")
         st.pyplot(fig)
+        
+ # ============================================================
+# DOWNLOAD EXCEL
+# ============================================================
+output = BytesIO()
+with pd.ExcelWriter(output, engine="openpyxl") as writer:
+    PTV_df.to_excel(writer, "PTV", index=False)
+    OAR_df.to_excel(writer, "OAR", index=False)
+    wilcox_df.to_excel(writer, "Wilcoxon", index=False)
 
-    # ============================================================
-    # DOWNLOAD EXCEL
-    # ============================================================
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        PTV_df.to_excel(writer,"PTV",index=False)
-        OAR_df.to_excel(writer,"OAR",index=False)
-        wilcox_df.to_excel(writer,"Wilcoxon",index=False)
-        PTV_summary.to_excel(writer,"PTV_stats",index=False)
-        OAR_summary.to_excel(writer,"OAR_stats",index=False)
-        if has_MU:
-            MU_df.to_excel(writer,"MU",index=False)
-            MU_summary_df.to_excel(writer,"MU_stats",index=False)
-            if not MU_eff_df.empty:
-                MU_eff_df.to_excel(writer,"MU_eff",index=False)
-                MU_Gy_summary_df.to_excel(writer,"MU_Gy_stats",index=False)
+    # Statistiche valori assoluti
+    PTV_stats.to_excel(writer, "PTV_stats", index=False)
+    OAR_stats.to_excel(writer, "OAR_stats", index=False)
 
-    st.download_button(
-        "📥 Scarica Excel completo",
-        data=output.getvalue(),
-        file_name="Analisi_RapidPlan_Advanced.xlsx"
-    )
+    if has_MU:
+        MU_df.to_excel(writer, "MU", index=False)
+        if not MU_eff_df.empty:
+            MU_eff_df.to_excel(writer, "MU_eff", index=False)
 
     # ============================================================
     # RISULTATO FINALE
