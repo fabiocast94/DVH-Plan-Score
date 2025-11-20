@@ -307,20 +307,6 @@ if uploaded_file:
         st.pyplot(fig)
 
     # ============================================================
-    # HEATMAP MU (con fix)
-    # ============================================================
-    if has_MU:
-        st.subheader("🔥 Heatmap MU (Δ% Nuovo vs Vecchio)")
-        heatmap_mu = MU_df.pivot_table(index="ID", values="Δ% MU")
-
-        if heatmap_mu.empty or heatmap_mu.isna().all().all():
-            st.info("ℹ️ Nessun dato valido per la heatmap MU.")
-        else:
-            fig, ax = plt.subplots(figsize=(4, len(heatmap_mu)*1.2))
-            sns.heatmap(heatmap_mu, cmap="coolwarm", center=0, annot=True, fmt=".1f")
-            st.pyplot(fig)
-
-    # ============================================================
     # DOWNLOAD EXCEL
     # ============================================================
     output = BytesIO()
