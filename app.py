@@ -20,25 +20,27 @@ METRIC_CRITERIA = {
     "Mean":"lower","Max":"lower","Min":"lower"
 }
 
-# Aggiunta criterio MU (meno MU = piano più efficiente)
+# MU → meno è meglio
 METRIC_CRITERIA["MU"] = "lower"
 
 EQUIV_THRESHOLD = 0.01  # soglia 1%
 
 def better_value(old, new, metric):
-    if pd.isna(old) or pd.isna(new): 
+    if pd.isna(old) or pd.isna(new):
         return "N/A"
-    crit = METRIC_CRITERIA.get(metric,"lower")
+    crit = METRIC_CRITERIA.get(metric, "lower")
     rel_diff = abs(new - old) / old if old != 0 else 0
+
     if rel_diff < EQUIV_THRESHOLD:
         return "Equivalente"
+
     if crit == "lower":
         return "Nuovo" if new < old else "Vecchio"
     else:
         return "Nuovo" if new > old else "Vecchio"
 
 # =============================
-# LOGO FISSO CENTRATO IN ALTO
+# LOGO
 # =============================
 logo_path = Path("06_Humanitas.png")
 if logo_path.exists():
@@ -53,7 +55,7 @@ if logo_path.exists():
         unsafe_allow_html=True
     )
 else:
-    st.warning("⚠️ Logo 06_Humanitas non trovato nella cartella dello script.")
+    st.warning("⚠️ Logo 06_Humanitas non trovato.")
 
 # ============================================================
 st.title("🔬 Analisi Multi-Struttura, Multi-Metrica e Monitor Units (MU)")
@@ -62,29 +64,20 @@ uploaded_file = st.file_uploader("Carica file Excel o CSV", type=["xlsx", "csv"]
 
 def load_any_file(file):
     name = file.name.lower()
-
     if name.endswith(".csv"):
         try:
             sample = file.read(2048).decode("utf-8", errors="ignore")
             file.seek(0)
-
-            if ";" in sample and sample.count(";") > sample.count(","):
-                sep = ";"
-            elif "\t" in sample:
-                sep = "\t"
-            else:
-                sep = ","
-
+            sep = "," if sample.count(",") >= sample.count(";") else ";"
+            if "\t" in sample: sep = "\t"
             try:
                 return pd.read_csv(file, sep=sep, encoding="utf-8")
             except:
                 file.seek(0)
                 return pd.read_csv(file, sep=sep, encoding="ISO-8859-1")
-
         except Exception as e:
-            st.error(f"Errore nel caricamento del CSV: {e}")
+            st.error(f"Errore CSV: {e}")
             return None
-
     return pd.read_excel(file)
 
 # ======== LETTURA ============
@@ -98,11 +91,9 @@ if uploaded_file:
     # ============================================================
     # CHECK MU
     # ============================================================
-    if "MU" not in df.columns:
-        st.warning("⚠️ Nessuna colonna 'MU' trovata. L’analisi MU sarà saltata.")
-        has_MU = False
-    else:
-        has_MU = True
+    has_MU = "MU" in df.columns
+    if not has_MU:
+        st.warning("⚠️ Nessuna colonna 'MU' trovata. L’analisi MU sarà esclusa.")
 
     # ============================================================
     # IDENTIFICAZIONE STRUTTURE
@@ -130,7 +121,7 @@ if uploaded_file:
     )
 
     # ============================================================
-    # Creazione risultati (metriche strutture)
+    # RISULTATI METRICHE STRUTTURE
     # ============================================================
     results = []
     for id_val in df[col_id].unique():
@@ -138,11 +129,11 @@ if uploaded_file:
 
         for struct, metrics in structures.items():
             for met, col in metrics.items():
-                v_old = temp[temp["TipoPiano"]=="Vecchio"][col].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
-                v_new = temp[temp["TipoPiano"]=="Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
+                v_old = temp[temp["TipoPiano"] == "Vecchio"][col].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
+                v_new = temp[temp["TipoPiano"] == "Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
 
+                diff_pct = ((v_new - v_old) / v_old * 100) if (v_old and not pd.isna(v_old)) else np.nan
                 winner = better_value(v_old, v_new, met)
-                diff_pct = ((v_new - v_old)/v_old*100 if v_old and not pd.isna(v_old) else np.nan)
 
                 results.append({
                     "ID": id_val,
@@ -158,10 +149,10 @@ if uploaded_file:
     results_df["Struttura_upper"] = results_df["Struttura"].str.upper()
 
     # ============================================================
-    # ANALISI MU
+    # MU ANALYSIS
     # ============================================================
     if has_MU:
-        MU_results = []
+        MU_list = []
         for id_val in df[col_id].unique():
             temp = df[df[col_id] == id_val]
 
@@ -171,7 +162,7 @@ if uploaded_file:
             diff_pct = ((MU_new - MU_old) / MU_old * 100) if (MU_old and not pd.isna(MU_old)) else np.nan
             winner = better_value(MU_old, MU_new, "MU")
 
-            MU_results.append({
+            MU_list.append({
                 "ID": id_val,
                 "MU Vecchio": MU_old,
                 "MU Nuovo": MU_new,
@@ -179,13 +170,13 @@ if uploaded_file:
                 "Piano più efficiente (MU)": winner
             })
 
-        MU_df = pd.DataFrame(MU_results)
+        MU_df = pd.DataFrame(MU_list)
 
-        # Efficienza MU/Gy se presente Dose
+        # MU/Gy
         if "Dose" in df.columns:
             df["MU_per_Gy"] = df["MU"] / df["Dose"]
-
             MU_eff_list = []
+
             for id_val in df[col_id].unique():
                 temp = df[df[col_id] == id_val]
 
@@ -208,20 +199,18 @@ if uploaded_file:
             MU_eff_df = pd.DataFrame()
 
     # ============================================================
-    # Sidebar Filtri
+    # SIDEBAR FILTRI
     # ============================================================
     st.sidebar.header("🔍 Filtri")
 
     structs_sel_upper = [s.upper() for s in st.sidebar.multiselect(
         "Seleziona strutture",
-        results_df["Struttura"].unique(),
-        default=None
+        results_df["Struttura"].unique()
     )]
 
     metrics_sel = st.sidebar.multiselect(
         "Seleziona metriche",
-        results_df["Metrica"].unique(),
-        default=None
+        results_df["Metrica"].unique()
     )
 
     results_filtered = results_df.copy()
@@ -231,10 +220,10 @@ if uploaded_file:
         results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
 
     # ============================================================
-    # Separazione PTV vs OAR
+    # PTV / OAR
     # ============================================================
-    PTV_df = results_filtered[results_filtered["Struttura"].str.upper().str.contains("PTV")]
-    OAR_df = results_filtered[~results_filtered["Struttura"].str.upper().str.contains("PTV")]
+    PTV_df = results_filtered[results_filtered["Struttura_upper"].str.contains("PTV")]
+    OAR_df = results_filtered[~results_filtered["Struttura_upper"].str.contains("PTV")]
 
     st.subheader("📊 Risultati PTV")
     st.dataframe(PTV_df)
@@ -243,114 +232,110 @@ if uploaded_file:
     st.dataframe(OAR_df)
 
     # ============================================================
-    # TABELLE MU
+    # MU
     # ============================================================
     if has_MU:
         st.subheader("⚡ Monitor Units (MU)")
         st.dataframe(MU_df)
 
         if not MU_eff_df.empty:
-            st.subheader("⚡ Efficienza MU per Gy")
+            st.subheader("⚡ Efficienza MU / Gy")
             st.dataframe(MU_eff_df)
 
     # ============================================================
-    # Test di Wilcoxon
+    # WILCOXON
     # ============================================================
     wilcox = []
     for struct in results_filtered["Struttura"].unique():
         for met in results_filtered["Metrica"].unique():
-            vals = results_filtered[(results_filtered["Struttura"]==struct)&(results_filtered["Metrica"]==met)]
-            if len(vals) < 2: continue
+            vals = results_filtered[
+                (results_filtered["Struttura"] == struct) &
+                (results_filtered["Metrica"] == met)
+            ]
+
+            if len(vals) < 2:
+                continue
+
             try:
                 stat, p = wilcoxon(vals["Valore Vecchio"], vals["Valore Nuovo"])
             except:
                 stat, p = None, None
+
             wilcox.append([struct, met, stat, p])
 
-    wilcox_df = pd.DataFrame(wilcox, columns=["Struttura","Metrica","Statistic","p-value"])
+    wilcox_df = pd.DataFrame(wilcox, columns=["Struttura", "Metrica", "Statistic", "p-value"])
     wilcox_df["Significativo"] = wilcox_df["p-value"] < 0.05
 
-    # Aggiunta Wilcoxon MU
+    # Aggiungere MU al Wilcoxon
     if has_MU:
         try:
             stat_MU, p_MU = wilcoxon(MU_df["MU Vecchio"], MU_df["MU Nuovo"])
         except:
             stat_MU, p_MU = None, None
 
-        wilcox_df = pd.concat([
-            wilcox_df,
-            pd.DataFrame({
-                "Struttura": ["GLOBAL"],
-                "Metrica": ["MU"],
-                "Statistic": [stat_MU],
-                "p-value": [p_MU],
-                "Significativo": [p_MU < 0.05 if p_MU is not None else False]
-            })
-        ], ignore_index=True)
+        wilcox_df.loc[len(wilcox_df)] = [
+            "GLOBAL", "MU", stat_MU, p_MU, p_MU < 0.05 if p_MU is not None else False
+        ]
 
     st.subheader("📊 Risultati Wilcoxon")
     st.dataframe(wilcox_df)
 
     # ============================================================
-    # Heatmap per struttura
+    # HEATMAP PER STRUTTURA (con fix)
     # ============================================================
     st.subheader("🔥 Heatmap per ogni struttura")
 
     for struct in results_filtered["Struttura"].unique():
         df_struct = results_filtered[results_filtered["Struttura"] == struct]
 
-        if df_struct.empty:
+        heatmap_data = df_struct.pivot_table(index="ID", columns="Metrica", values="Δ %")
+
+        # FIX → saltare heatmap vuota o tutta NaN
+        if heatmap_data.empty or heatmap_data.isna().all().all():
+            st.info(f"ℹ️ Nessun dato disponibile per la heatmap della struttura **{struct}**.")
             continue
 
-        heatmap_data = df_struct.pivot_table(
-            index="ID",
-            columns="Metrica",
-            values="Δ %"
-        )
+        fig, ax = plt.subplots(figsize=(max(6, len(heatmap_data.columns)*1.5),
+                                        max(3, len(heatmap_data.index)*1.2)))
 
-        fig_width = max(6, len(heatmap_data.columns)*1.5)
-        fig_height = max(3, len(heatmap_data.index)*1.2)
-        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        sns.heatmap(heatmap_data, cmap="coolwarm", center=0,
+                    annot=True, fmt=".1f", linewidths=0.5,
+                    cbar_kws={"label": "Δ % (Nuovo vs Vecchio)"})
 
-        sns.heatmap(
-            heatmap_data,
-            cmap="coolwarm",
-            center=0,
-            annot=True,
-            fmt=".1f",
-            linewidths=0.5,
-            cbar_kws={"label": "Δ % (Nuovo vs Vecchio)"}
-        )
         plt.xticks(rotation=45, ha='right')
         plt.title(f"Heatmap Δ% – {struct}")
-        plt.tight_layout()
         st.pyplot(fig)
 
-    # Heatmap MU
+    # ============================================================
+    # HEATMAP MU (con fix)
+    # ============================================================
     if has_MU:
         st.subheader("🔥 Heatmap MU (Δ% Nuovo vs Vecchio)")
         heatmap_mu = MU_df.pivot_table(index="ID", values="Δ% MU")
-        fig, ax = plt.subplots(figsize=(4, len(heatmap_mu)*1.2))
-        sns.heatmap(heatmap_mu, cmap="coolwarm", center=0, annot=True, fmt=".1f")
-        st.pyplot(fig)
+
+        if heatmap_mu.empty or heatmap_mu.isna().all().all():
+            st.info("ℹ️ Nessun dato valido per la heatmap MU.")
+        else:
+            fig, ax = plt.subplots(figsize=(4, len(heatmap_mu)*1.2))
+            sns.heatmap(heatmap_mu, cmap="coolwarm", center=0, annot=True, fmt=".1f")
+            st.pyplot(fig)
 
     # ============================================================
-    # Download Excel
+    # DOWNLOAD EXCEL
     # ============================================================
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        PTV_df.to_excel(writer,"PTV",index=False)
-        OAR_df.to_excel(writer,"OAR",index=False)
-        wilcox_df.to_excel(writer,"Wilcoxon",index=False)
-
+        PTV_df.to_excel(writer, "PTV", index=False)
+        OAR_df.to_excel(writer, "OAR", index=False)
+        wilcox_df.to_excel(writer, "Wilcoxon", index=False)
         if has_MU:
-            MU_df.to_excel(writer,"MU",index=False)
+            MU_df.to_excel(writer, "MU", index=False)
             if not MU_eff_df.empty:
-                MU_eff_df.to_excel(writer,"MU_eff",index=False)
+                MU_eff_df.to_excel(writer, "MU_eff", index=False)
 
     st.download_button(
         "📥 Scarica Excel completo",
-        data = output.getvalue(),
+        data=output.getvalue(),
         file_name="Analisi_RapidPlan_Advanced.xlsx"
     )
 
@@ -358,10 +343,11 @@ if uploaded_file:
     # RISULTATO FINALE
     # ============================================================
     st.subheader("🏁 RISULTATO FINALE")
+
     summary = results_filtered["Migliore"].value_counts()
     st.write(summary)
 
-    if summary.get("Nuovo",0) > summary.get("Vecchio",0):
-        st.success("🎉 Il nuovo modello RapidPlan risulta complessivamente migliore!")
+    if summary.get("Nuovo", 0) > summary.get("Vecchio", 0):
+        st.success("🎉 Il modello RapidPlan NUOVO è complessivamente migliore!")
     else:
-        st.error("⚠️ Il modello vecchio sembra migliore su queste metriche.")
+        st.error("⚠️ Il modello RapidPlan VECCHIO sembra migliore su queste metriche.")
