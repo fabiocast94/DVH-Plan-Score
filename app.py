@@ -212,24 +212,25 @@ if uploaded_file:
     st.dataframe(OAR_df)
 
 # ============================================================
-# STATISTICHE METRICHE PTV / OAR
+# STATISTICHE VALORI ASSOLUTI PTV / OAR
 # ============================================================
-    def summary_stats(df_group):
-    # Raggruppa per Struttura e Metrica
+    def summary_values(df_group):
+    # Raggruppa per Struttura e Metrica e calcola media e dev std sui valori
         return df_group.groupby(["Struttura", "Metrica"]).agg(
-            Media=('Δ %', 'mean'),
-            DevStd=('Δ %', 'std')
+            Media_Vecchio=('Valore Vecchio', 'mean'),
+            DevStd_Vecchio=('Valore Vecchio', 'std'),
+            Media_Nuovo=('Valore Nuovo', 'mean'),
+            DevStd_Nuovo=('Valore Nuovo', 'std')
         ).reset_index()
 
-    PTV_summary = summary_stats(PTV_df)
-    OAR_summary = summary_stats(OAR_df)
+    PTV_stats = summary_values(PTV_df)
+    OAR_stats = summary_values(OAR_df)
 
-    st.subheader("📈 Statistiche Δ% PTV (Media & Dev Std)")
-    st.dataframe(PTV_summary)
+    st.subheader("📈 Statistiche VALORI PTV")
+    st.dataframe(PTV_stats)
 
-    st.subheader("📈 Statistiche Δ% OAR (Media & Dev Std)")
-    st.dataframe(OAR_summary)
-
+    st.subheader("📈 Statistiche VALORI OAR")
+    st.dataframe(OAR_stats)
 
     # ============================================================
     # WILCOXON
