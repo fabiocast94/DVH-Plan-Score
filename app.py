@@ -17,7 +17,8 @@ METRIC_CRITERIA = {
     "V95": "higher","V90": "higher","V107": "lower",
     "V20": "lower","V5": "lower","V10": "lower",
     "CI": "higher","PI95":"higher","CI95":"higher",
-    "Mean":"lower","Max":"lower","Min":"lower"
+    "Mean":"lower","Max":"lower","Min":"lower",
+    "mean":"lower","max":"lower","min":"lower"
 }
 
 # MU → meno è meglio
@@ -28,6 +29,7 @@ EQUIV_THRESHOLD = 0.01  # soglia 1%
 def better_value(old, new, metric):
     if pd.isna(old) or pd.isna(new):
         return "N/A"
+
     crit = METRIC_CRITERIA.get(metric, "lower")
     rel_diff = abs(new - old) / old if old != 0 else 0
 
@@ -62,25 +64,38 @@ st.title("🔬 Analisi Multi-Struttura, Multi-Metrica e Monitor Units (MU)")
 
 uploaded_file = st.file_uploader("Carica file Excel o CSV", type=["xlsx", "csv"])
 
+
+# ============================================================
+# LETTURA SICURA FILE
+# ============================================================
 def load_any_file(file):
     name = file.name.lower()
+
     if name.endswith(".csv"):
         try:
             sample = file.read(2048).decode("utf-8", errors="ignore")
             file.seek(0)
-            sep = "," if sample.count(",") >= sample.count(";") else ";"
-            if "\t" in sample: sep = "\t"
+
+            if "\t" in sample:
+                sep = "\t"
+            else:
+                sep = "," if sample.count(",") >= sample.count(";") else ";"
+
             try:
                 return pd.read_csv(file, sep=sep, encoding="utf-8")
             except:
                 file.seek(0)
                 return pd.read_csv(file, sep=sep, encoding="ISO-8859-1")
+
         except Exception as e:
             st.error(f"Errore CSV: {e}")
             return None
+
     return pd.read_excel(file)
 
-# ======== LETTURA ============
+# ============================================================
+# MAIN
+# ============================================================
 if uploaded_file:
     df = load_any_file(uploaded_file)
     if df is None:
@@ -108,7 +123,7 @@ if uploaded_file:
     st.write("Strutture trovate:", list(structures.keys()))
 
     # ============================================================
-    # Tipo Piano Nuovo vs Vecchio
+    # IDENTIFICAZIONE TIPI DI PIANO
     # ============================================================
     plan_cols = [c for c in df.columns if "plan" in c.lower()]
     col_plan = plan_cols[0] if plan_cols else "planID"
@@ -124,15 +139,25 @@ if uploaded_file:
     # RISULTATI METRICHE STRUTTURE
     # ============================================================
     results = []
+
     for id_val in df[col_id].unique():
         temp = df[df[col_id] == id_val]
 
         for struct, metrics in structures.items():
             for met, col in metrics.items():
-                v_old = temp[temp["TipoPiano"] == "Vecchio"][col].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
-                v_new = temp[temp["TipoPiano"] == "Nuovo"][col].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
 
-                diff_pct = ((v_new - v_old) / v_old * 100) if (v_old and not pd.isna(v_old)) else np.nan
+                old_vals = temp[temp["TipoPiano"]=="Vecchio"]
+                new_vals = temp[temp["TipoPiano"]=="Nuovo"]
+
+                v_old = old_vals[col].iloc[0] if not old_vals.empty else np.nan
+                v_new = new_vals[col].iloc[0] if not new_vals.empty else np.nan
+
+                # Δ% SICURO
+                if pd.isna(v_old) or v_old == 0:
+                    diff_pct = np.nan
+                else:
+                    diff_pct = (v_new - v_old) / v_old * 100
+
                 winner = better_value(v_old, v_new, met)
 
                 results.append({
@@ -149,17 +174,25 @@ if uploaded_file:
     results_df["Struttura_upper"] = results_df["Struttura"].str.upper()
 
     # ============================================================
-    # MU ANALYSIS
+    # ANALISI MU
     # ============================================================
     if has_MU:
         MU_list = []
+
         for id_val in df[col_id].unique():
             temp = df[df[col_id] == id_val]
 
-            MU_old = temp[temp["TipoPiano"]=="Vecchio"]["MU"].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
-            MU_new = temp[temp["TipoPiano"]=="Nuovo"]["MU"].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
+            old_vals = temp[temp["TipoPiano"]=="Vecchio"]
+            new_vals = temp[temp["TipoPiano"]=="Nuovo"]
 
-            diff_pct = ((MU_new - MU_old) / MU_old * 100) if (MU_old and not pd.isna(MU_old)) else np.nan
+            MU_old = old_vals["MU"].iloc[0] if not old_vals.empty else np.nan
+            MU_new = new_vals["MU"].iloc[0] if not new_vals.empty else np.nan
+
+            if pd.isna(MU_old) or MU_old == 0:
+                diff_pct = np.nan
+            else:
+                diff_pct = (MU_new - MU_old) / MU_old * 100
+
             winner = better_value(MU_old, MU_new, "MU")
 
             MU_list.append({
@@ -172,7 +205,7 @@ if uploaded_file:
 
         MU_df = pd.DataFrame(MU_list)
 
-        # MU/Gy
+        # MU/Gy (solo se Dose esiste)
         if "Dose" in df.columns:
             df["MU_per_Gy"] = df["MU"] / df["Dose"]
             MU_eff_list = []
@@ -180,10 +213,17 @@ if uploaded_file:
             for id_val in df[col_id].unique():
                 temp = df[df[col_id] == id_val]
 
-                eff_old = temp[temp["TipoPiano"]=="Vecchio"]["MU_per_Gy"].iloc[0] if not temp[temp["TipoPiano"]=="Vecchio"].empty else np.nan
-                eff_new = temp[temp["TipoPiano"]=="Nuovo"]["MU_per_Gy"].iloc[0] if not temp[temp["TipoPiano"]=="Nuovo"].empty else np.nan
+                old_vals = temp[temp["TipoPiano"]=="Vecchio"]
+                new_vals = temp[temp["TipoPiano"]=="Nuovo"]
 
-                diff_pct = ((eff_new - eff_old)/eff_old*100) if (eff_old and not pd.isna(eff_old)) else np.nan
+                eff_old = old_vals["MU_per_Gy"].iloc[0] if not old_vals.empty else np.nan
+                eff_new = new_vals["MU_per_Gy"].iloc[0] if not new_vals.empty else np.nan
+
+                if pd.isna(eff_old) or eff_old == 0:
+                    diff_pct = np.nan
+                else:
+                    diff_pct = (eff_new - eff_old) / eff_old * 100
+
                 winner = better_value(eff_old, eff_new, "MU")
 
                 MU_eff_list.append({
@@ -203,10 +243,12 @@ if uploaded_file:
     # ============================================================
     st.sidebar.header("🔍 Filtri")
 
-    structs_sel_upper = [s.upper() for s in st.sidebar.multiselect(
-        "Seleziona strutture",
-        results_df["Struttura"].unique()
-    )]
+    structs_sel_upper = [
+        s.upper() for s in st.sidebar.multiselect(
+            "Seleziona strutture",
+            results_df["Struttura"].unique()
+        )
+    ]
 
     metrics_sel = st.sidebar.multiselect(
         "Seleziona metriche",
@@ -214,10 +256,16 @@ if uploaded_file:
     )
 
     results_filtered = results_df.copy()
+
     if structs_sel_upper:
-        results_filtered = results_filtered[results_filtered["Struttura_upper"].isin(structs_sel_upper)]
+        results_filtered = results_filtered[
+            results_filtered["Struttura_upper"].isin(structs_sel_upper)
+        ]
+
     if metrics_sel:
-        results_filtered = results_filtered[results_filtered["Metrica"].isin(metrics_sel)]
+        results_filtered = results_filtered[
+            results_filtered["Metrica"].isin(metrics_sel)
+        ]
 
     # ============================================================
     # PTV / OAR
@@ -246,6 +294,7 @@ if uploaded_file:
     # WILCOXON
     # ============================================================
     wilcox = []
+
     for struct in results_filtered["Struttura"].unique():
         for met in results_filtered["Metrica"].unique():
             vals = results_filtered[
@@ -266,7 +315,7 @@ if uploaded_file:
     wilcox_df = pd.DataFrame(wilcox, columns=["Struttura", "Metrica", "Statistic", "p-value"])
     wilcox_df["Significativo"] = wilcox_df["p-value"] < 0.05
 
-    # Aggiungere MU al Wilcoxon
+    # Wilcoxon MU
     if has_MU:
         try:
             stat_MU, p_MU = wilcoxon(MU_df["MU Vecchio"], MU_df["MU Nuovo"])
@@ -281,26 +330,38 @@ if uploaded_file:
     st.dataframe(wilcox_df)
 
     # ============================================================
-    # HEATMAP PER STRUTTURA (con fix)
+    # HEATMAP PER STRUTTURA
     # ============================================================
     st.subheader("🔥 Heatmap per ogni struttura")
 
     for struct in results_filtered["Struttura"].unique():
+
         df_struct = results_filtered[results_filtered["Struttura"] == struct]
 
-        heatmap_data = df_struct.pivot_table(index="ID", columns="Metrica", values="Δ %")
+        heatmap_data = df_struct.pivot_table(
+            index="ID",
+            columns="Metrica",
+            values="Δ %"
+        )
 
-        # FIX → saltare heatmap vuota o tutta NaN
+        # Nessun messaggio — semplicemente salta
         if heatmap_data.empty or heatmap_data.isna().all().all():
-            st.info(f"ℹ️ Nessun dato disponibile per la heatmap della struttura **{struct}**.")
             continue
 
-        fig, ax = plt.subplots(figsize=(max(6, len(heatmap_data.columns)*1.5),
-                                        max(3, len(heatmap_data.index)*1.2)))
+        fig, ax = plt.subplots(figsize=(
+            max(6, len(heatmap_data.columns) * 1.5),
+            max(3, len(heatmap_data.index) * 1.2)
+        ))
 
-        sns.heatmap(heatmap_data, cmap="coolwarm", center=0,
-                    annot=True, fmt=".1f", linewidths=0.5,
-                    cbar_kws={"label": "Δ % (Nuovo vs Vecchio)"})
+        sns.heatmap(
+            heatmap_data,
+            cmap="coolwarm",
+            center=0,
+            annot=True,
+            fmt=".1f",
+            linewidths=0.5,
+            cbar_kws={"label": "Δ % (Nuovo vs Vecchio)"}
+        )
 
         plt.xticks(rotation=45, ha='right')
         plt.title(f"Heatmap Δ% – {struct}")
@@ -310,10 +371,12 @@ if uploaded_file:
     # DOWNLOAD EXCEL
     # ============================================================
     output = BytesIO()
+
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         PTV_df.to_excel(writer, "PTV", index=False)
         OAR_df.to_excel(writer, "OAR", index=False)
         wilcox_df.to_excel(writer, "Wilcoxon", index=False)
+
         if has_MU:
             MU_df.to_excel(writer, "MU", index=False)
             if not MU_eff_df.empty:
