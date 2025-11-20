@@ -211,38 +211,25 @@ if uploaded_file:
     st.subheader("🫁 Risultati OAR")
     st.dataframe(OAR_df)
 
-    # ============================================================
-    # STATISTICHE METRICHE PTV / OAR
-    # ============================================================
-    def summary_stats(df_group):
-        return df_group.groupby("Metrica").agg(
-            Media=('Δ %', 'mean'),
-            DevStd=('Δ %', 'std')
-        ).reset_index()
+# ============================================================
+# STATISTICHE METRICHE PTV / OAR
+# ============================================================
+def summary_stats(df_group):
+    # Raggruppa per Struttura e Metrica
+    return df_group.groupby(["Struttura", "Metrica"]).agg(
+        Media=('Δ %', 'mean'),
+        DevStd=('Δ %', 'std')
+    ).reset_index()
 
-    PTV_summary = summary_stats(PTV_df)
-    OAR_summary = summary_stats(OAR_df)
+PTV_summary = summary_stats(PTV_df)
+OAR_summary = summary_stats(OAR_df)
 
-    st.subheader("📈 Statistiche Δ% PTV (Media & Dev Std)")
-    st.dataframe(PTV_summary)
+st.subheader("📈 Statistiche Δ% PTV (Media & Dev Std)")
+st.dataframe(PTV_summary)
 
-    st.subheader("📈 Statistiche Δ% OAR (Media & Dev Std)")
-    st.dataframe(OAR_summary)
+st.subheader("📈 Statistiche Δ% OAR (Media & Dev Std)")
+st.dataframe(OAR_summary)
 
-    # ============================================================
-    # MU
-    # ============================================================
-    if has_MU:
-        st.subheader("⚡ Monitor Units (MU)")
-        st.dataframe(MU_df)
-        st.subheader("⚡ Statistiche MU (Media & Dev Std)")
-        st.dataframe(MU_summary_df)
-
-        if not MU_eff_df.empty:
-            st.subheader("⚡ Efficienza MU / Gy")
-            st.dataframe(MU_eff_df)
-            st.subheader("⚡ Statistiche MU/Gy (Media & Dev Std)")
-            st.dataframe(MU_Gy_summary_df)
 
     # ============================================================
     # WILCOXON
