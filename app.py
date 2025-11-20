@@ -214,21 +214,21 @@ if uploaded_file:
 # ============================================================
 # STATISTICHE METRICHE PTV / OAR
 # ============================================================
-def summary_stats(df_group):
+    def summary_stats(df_group):
     # Raggruppa per Struttura e Metrica
-    return df_group.groupby(["Struttura", "Metrica"]).agg(
-        Media=('Δ %', 'mean'),
-        DevStd=('Δ %', 'std')
-    ).reset_index()
+        return df_group.groupby(["Struttura", "Metrica"]).agg(
+            Media=('Δ %', 'mean'),
+            DevStd=('Δ %', 'std')
+        ).reset_index()
 
-PTV_summary = summary_stats(PTV_df)
-OAR_summary = summary_stats(OAR_df)
+    PTV_summary = summary_stats(PTV_df)
+    OAR_summary = summary_stats(OAR_df)
 
-st.subheader("📈 Statistiche Δ% PTV (Media & Dev Std)")
-st.dataframe(PTV_summary)
+    st.subheader("📈 Statistiche Δ% PTV (Media & Dev Std)")
+    st.dataframe(PTV_summary)
 
-st.subheader("📈 Statistiche Δ% OAR (Media & Dev Std)")
-st.dataframe(OAR_summary)
+    st.subheader("📈 Statistiche Δ% OAR (Media & Dev Std)")
+    st.dataframe(OAR_summary)
 
 
     # ============================================================
