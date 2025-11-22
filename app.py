@@ -275,23 +275,34 @@ if uploaded_file:
         plt.title(f"Heatmap Δ% – {struct}")
         st.pyplot(fig)
         
- # ============================================================
-# DOWNLOAD EXCEL
-# ============================================================
-output = BytesIO()
-with pd.ExcelWriter(output, engine="openpyxl") as writer:
-    PTV_df.to_excel(writer, "PTV", index=False)
-    OAR_df.to_excel(writer, "OAR", index=False)
-    wilcox_df.to_excel(writer, "Wilcoxon", index=False)
+    # ============================================================
+    # DOWNLOAD EXCEL
+    # ============================================================
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        PTV_df.to_excel(writer, "PTV", index=False)
+        OAR_df.to_excel(writer, "OAR", index=False)
+        wilcox_df.to_excel(writer, "Wilcoxon", index=False)
 
-    # Statistiche valori assoluti
-    PTV_stats.to_excel(writer, "PTV_stats", index=False)
-    OAR_stats.to_excel(writer, "OAR_stats", index=False)
+        PTV_stats.to_excel(writer, "PTV_stats", index=False)
+        OAR_stats.to_excel(writer, "OAR_stats", index=False)
 
-    if has_MU:
-        MU_df.to_excel(writer, "MU", index=False)
-        if not MU_eff_df.empty:
-            MU_eff_df.to_excel(writer, "MU_eff", index=False)
+        if has_MU:
+            MU_df.to_excel(writer, "MU", index=False)
+            if not MU_eff_df.empty:
+                MU_eff_df.to_excel(writer, "MU_eff", index=False)
+
+        # Fix openpyxl: almeno un foglio visibile
+        for ws in writer.book.worksheets:
+            ws.sheet_state = "visible"
+
+    output.seek(0)
+    st.download_button(
+        "⬇️ Scarica Excel completo",
+        output,
+        file_name="risultati_analisi.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
     # ============================================================
     # RISULTATO FINALE
